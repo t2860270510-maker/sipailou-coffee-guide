@@ -40,6 +40,9 @@ type MiniMaxRecommendationPayload = {
   }>;
 };
 
+const DEFAULT_MINIMAX_TIMEOUT_MS = 12000;
+const MAX_ATTEMPTS_PER_MODEL = 2;
+
 function getMiniMaxConfig() {
   const apiKey = process.env.MINIMAX_API_KEY ?? process.env.ANTHROPIC_API_KEY;
   const apiKeySource = process.env.MINIMAX_API_KEY
@@ -112,6 +115,35 @@ function buildMiniMaxError(error: MiniMaxErrorResponse["error"], model: string) 
   }
 
   return new Error(`${message}${requestId}`);
+}
+
+function getRequestTimeoutMs() {
+  const rawValue = Number.parseInt(process.env.MINIMAX_TIMEOUT_MS ?? "", 10);
+  return Number.isFinite(rawValue) && rawValue >= 3000 ? rawValue : DEFAULT_MINIMAX_TIMEOUT_MS;
+}
+
+function isTimeoutError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.name === "TimeoutError" ||
+    error.name === "AbortError" ||
+    /aborted due to timeout|timeout/i.test(error.message)
+  );
+}
+
+function toUserFacingMiniMaxError(error: unknown) {
+  if (isTimeoutError(error)) {
+    return new Error("AI 推荐这次响应有点慢，请再试一次。");
+  }
+
+  if (error instanceof Error) {
+    return error;
+  }
+
+  return new Error("推荐服务暂时不可用，请稍后再试。");
 }
 
 function normalizeJsonPayload(text: string) {
@@ -203,34 +235,38 @@ async function createMiniMaxMessage({
   model: string;
   prompt: string;
 }) {
-  const response = await fetch(`${baseURL.replace(/\/$/, "")}/v1/messages`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    signal: AbortSignal.timeout(6500),
-    body: JSON.stringify({
-      model,
-      system: MINIMAX_SYSTEM_PROMPT,
-      max_tokens: 900,
-      temperature: 0.3,
-      messages: [
-        {
-          role: "user",
-          content: [{ type: "text", text: prompt }],
-        },
-      ],
-    }),
-  });
+  try {
+    const response = await fetch(`${baseURL.replace(/\/$/, "")}/v1/messages`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      signal: AbortSignal.timeout(getRequestTimeoutMs()),
+      body: JSON.stringify({
+        model,
+        system: MINIMAX_SYSTEM_PROMPT,
+        max_tokens: 900,
+        temperature: 0.3,
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: prompt }],
+          },
+        ],
+      }),
+    });
 
-  const payload = (await response.json()) as MiniMaxSuccessResponse & MiniMaxErrorResponse;
-  if (response.ok) {
-    return payload;
+    const payload = (await response.json()) as MiniMaxSuccessResponse & MiniMaxErrorResponse;
+    if (response.ok) {
+      return payload;
+    }
+
+    throw buildMiniMaxError(payload.error, model);
+  } catch (error) {
+    throw toUserFacingMiniMaxError(error);
   }
-
-  throw buildMiniMaxError(payload.error, model);
 }
 
 function shouldTryNextModel(error: unknown, currentModel: string, allModels: string[]) {
@@ -251,49 +287,56 @@ async function enhanceWithMiniMax(rawQuery: string): Promise<RecommendationResul
   const prompt = buildRecommendationPrompt(rawQuery);
 
   for (const model of config.models) {
-    try {
-      const message = await createMiniMaxMessage({
-        apiKey: config.apiKey,
-        baseURL: config.baseURL,
-        model,
-        prompt,
-      });
+    for (let attempt = 0; attempt < MAX_ATTEMPTS_PER_MODEL; attempt += 1) {
+      try {
+        const message = await createMiniMaxMessage({
+          apiKey: config.apiKey,
+          baseURL: config.baseURL,
+          model,
+          prompt,
+        });
 
-      const text = (message.content ?? [])
-        .filter((block): block is { type: "text"; text: string } => block.type === "text")
-        .map((block) => block.text)
-        .join("\n")
-        .trim();
+        const text = (message.content ?? [])
+          .filter((block): block is { type: "text"; text: string } => block.type === "text")
+          .map((block) => block.text)
+          .join("\n")
+          .trim();
 
-      if (!text) {
-        continue;
+        if (!text) {
+          continue;
+        }
+
+        const parsed = parseRecommendationPayload(text);
+        if (!parsed) {
+          continue;
+        }
+
+        const topPicks = hydrateRankedCafes(parsed.picks);
+        if (!topPicks) {
+          continue;
+        }
+
+        return {
+          parsedRequest: parseRecommendationQuery(rawQuery),
+          parsedRequestSummary: parsed.parsedRequestSummary,
+          topPicks,
+          explanation: parsed.explanation,
+          comparisonNote: parsed.comparisonNote,
+          tradeoffNote: parsed.tradeoffNote,
+          modelUsed: message.model ?? model,
+        };
+      } catch (error) {
+        const canRetryCurrentModel = isTimeoutError(error) && attempt < MAX_ATTEMPTS_PER_MODEL - 1;
+        if (canRetryCurrentModel) {
+          continue;
+        }
+
+        if (shouldTryNextModel(error, model, config.models)) {
+          break;
+        }
+
+        throw error;
       }
-
-      const parsed = parseRecommendationPayload(text);
-      if (!parsed) {
-        continue;
-      }
-
-      const topPicks = hydrateRankedCafes(parsed.picks);
-      if (!topPicks) {
-        continue;
-      }
-
-      return {
-        parsedRequest: parseRecommendationQuery(rawQuery),
-        parsedRequestSummary: parsed.parsedRequestSummary,
-        topPicks,
-        explanation: parsed.explanation,
-        comparisonNote: parsed.comparisonNote,
-        tradeoffNote: parsed.tradeoffNote,
-        modelUsed: message.model ?? model,
-      };
-    } catch (error) {
-      if (shouldTryNextModel(error, model, config.models)) {
-        continue;
-      }
-
-      throw error;
     }
   }
 

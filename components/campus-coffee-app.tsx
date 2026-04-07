@@ -91,6 +91,18 @@ function formatModelLabel(modelUsed: string) {
   return modelUsed;
 }
 
+function toConversationErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) {
+    return "推荐服务暂时不可用，请稍后再试。";
+  }
+
+  if (/aborted due to timeout|timeout/i.test(error.message)) {
+    return "AI 推荐这次响应有点慢，请再试一次。";
+  }
+
+  return error.message || "推荐服务暂时不可用，请稍后再试。";
+}
+
 type CampusCoffeeAppProps = {
   cafes: Cafe[];
   guideGroups: GuideGroup[];
@@ -169,7 +181,7 @@ export function CampusCoffeeApp({
                 id: `error-${Date.now()}`,
                 role: "assistant",
                 type: "intro",
-                content: error instanceof Error ? error.message : "推荐服务暂时不可用。",
+                content: toConversationErrorMessage(error),
               }
             : item,
         ),
