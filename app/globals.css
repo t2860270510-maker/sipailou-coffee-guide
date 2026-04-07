@@ -396,17 +396,19 @@ img {
 .editorial-inline-card h3 + p {
   margin: 0;
   line-height: 1.78;
+  white-space: pre-wrap;
 }
 
 .result-lead {
   margin-top: 6px;
 }
 
-.message-loading {
+.message-streaming {
   position: relative;
+  min-height: 1.8em;
 }
 
-.message-loading::after {
+.message-streaming::after {
   content: "";
   display: inline-block;
   width: 1.1em;

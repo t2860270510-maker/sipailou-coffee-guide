@@ -9,7 +9,6 @@ import type {
   EditorialMoment,
   GuideGroup,
   GuideGroupId,
-  RecommendationResult,
 } from "../lib/types";
 
 const scenarioPrompts = [
@@ -33,31 +32,12 @@ const heroSignals = [
   },
 ];
 
-type ConversationItem =
-  | {
-      id: string;
-      role: "assistant";
-      type: "intro";
-      content: string;
-    }
-  | {
-      id: string;
-      role: "user";
-      type: "text";
-      content: string;
-    }
-  | {
-      id: string;
-      role: "assistant";
-      type: "loading";
-      content: string;
-    }
-  | {
-      id: string;
-      role: "assistant";
-      type: "result";
-      result: RecommendationResult;
-    };
+type ConversationItem = {
+  id: string;
+  role: "assistant" | "user";
+  type: "intro" | "text" | "streaming";
+  content: string;
+};
 
 const initialConversation: ConversationItem[] = [
   {
@@ -87,10 +67,6 @@ function formatScene(scene: Cafe["mainScene"]) {
   return "聊天坐坐";
 }
 
-function formatModelLabel(modelUsed: string) {
-  return modelUsed;
-}
-
 function toConversationErrorMessage(error: unknown) {
   if (!(error instanceof Error)) {
     return "推荐服务暂时不可用，请稍后再试。";
@@ -101,6 +77,18 @@ function toConversationErrorMessage(error: unknown) {
   }
 
   return error.message || "推荐服务暂时不可用，请稍后再试。";
+}
+
+async function readErrorMessage(response: Response) {
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json")) {
+    const payload = (await response.json().catch(() => null)) as { message?: string } | null;
+    return payload?.message ?? "推荐服务暂时不可用，请稍后再试。";
+  }
+
+  const text = await response.text().catch(() => "");
+  return text.trim() || "推荐服务暂时不可用，请稍后再试。";
 }
 
 type CampusCoffeeAppProps = {
@@ -129,8 +117,8 @@ export function CampusCoffeeApp({
   const visibleCafes = getGuideGroupMatches(deferredGuideGroup);
 
   useEffect(() => {
-    scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [conversation, isPending]);
+    scrollAnchorRef.current?.scrollIntoView({ behavior: isSubmitting ? "auto" : "smooth", block: "end" });
+  }, [conversation, isPending, isSubmitting]);
 
   async function submitPrompt(nextQuery?: string) {
     const payload = (nextQuery ?? query).trim();
@@ -146,7 +134,7 @@ export function CampusCoffeeApp({
     setConversation((current) => [
       ...current,
       { id: `user-${Date.now()}`, role: "user", type: "text", content: payload },
-      { id: loadingId, role: "assistant", type: "loading", content: "正在理解你的需求，并挑出更合适的两家店..." },
+      { id: loadingId, role: "assistant", type: "streaming", content: "" },
     ]);
     setQuery("");
 
@@ -159,16 +147,42 @@ export function CampusCoffeeApp({
         body: JSON.stringify({ query: payload }),
       });
 
-      const result = await response.json();
       if (!response.ok) {
-        throw new Error(result.message ?? "推荐服务暂时不可用。");
+        throw new Error(await readErrorMessage(response));
       }
 
+      if (!response.body) {
+        throw new Error("模型没有返回可显示内容。");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let streamedText = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          streamedText += decoder.decode();
+          break;
+        }
+
+        streamedText += decoder.decode(value, { stream: true });
+        const nextContent = streamedText;
+        setConversation((current) =>
+          current.map((item) =>
+            item.id === loadingId
+              ? { ...item, type: "streaming", content: nextContent }
+              : item,
+          ),
+        );
+      }
+
+      const finalContent = streamedText.trim() || "这次没有生成可显示内容。";
       startTransition(() => {
         setConversation((current) =>
           current.map((item) =>
             item.id === loadingId
-              ? { id: `result-${Date.now()}`, role: "assistant", type: "result", result }
+              ? { ...item, type: "text", content: finalContent }
               : item,
           ),
         );
@@ -209,68 +223,13 @@ export function CampusCoffeeApp({
 
             <div ref={chatLogRef} className="chat-log" aria-live="polite">
               {conversation.map((item) => {
-                if (item.type === "result") {
-                  return (
-                    <article key={item.id} className="message message-assistant message-result">
-                      <p className="message-label">Assistant</p>
-                      <p className="message-text">{item.result.parsedRequestSummary}</p>
-                      <p className="message-text result-lead">{item.result.explanation}</p>
-
-                      <div className="result-overview">
-                        <span>这次先看这两家</span>
-                        <span>{formatModelLabel(item.result.modelUsed)}</span>
-                      </div>
-
-                      <div className="recommendation-cards">
-                        {item.result.topPicks.map((candidate, index) => (
-                          <button
-                            key={candidate.cafe.id}
-                            className="result-card"
-                            type="button"
-                            onClick={() => setSelectedCafe(candidate.cafe)}
-                          >
-                            <div className="result-card-head">
-                              <span className="result-index">0{index + 1}</span>
-                              <div>
-                                <h3>{candidate.cafe.name}</h3>
-                                <p>
-                                  {candidate.cafe.locationText} · {candidate.cafe.nearestGate}
-                                </p>
-                              </div>
-                            </div>
-                            <p className="result-summary">{candidate.cafe.summary}</p>
-                            <div className="metric-row">
-                              <span>{candidate.cafe.walkTimeMin} 分钟</span>
-                              <span>{formatPrice(candidate.cafe.priceLevel)}</span>
-                              <span>{formatScene(candidate.cafe.mainScene)}</span>
-                              <span>{candidate.cafe.weekdayHours}</span>
-                            </div>
-                            <ul className="reason-list compact">
-                              {candidate.fitReasons.map((reason) => (
-                                <li key={`${candidate.cafe.id}-${reason}`}>{reason}</li>
-                              ))}
-                            </ul>
-                            <p className="result-tradeoff">
-                              需要注意：{candidate.tradeoffs[0]}
-                            </p>
-                          </button>
-                        ))}
-                      </div>
-
-                      <p className="chat-note">{item.result.comparisonNote}</p>
-                      <p className="chat-note subtle">{item.result.tradeoffNote}</p>
-                      <p className="chat-model">{formatModelLabel(item.result.modelUsed)}</p>
-                    </article>
-                  );
-                }
-
                 return (
                   <article
                     key={item.id}
                     className={`message ${item.role === "user" ? "message-user" : "message-assistant"}`}
                   >
                     <p className="message-label">{item.role === "user" ? "You" : "Assistant"}</p>
-                    <p className={`message-text ${item.type === "loading" ? "message-loading" : ""}`}>
+                    <p className={`message-text ${item.type === "streaming" ? "message-streaming" : ""}`}>
                       {item.content}
                     </p>
                   </article>

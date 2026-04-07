@@ -19,29 +19,10 @@ export const MINIMAX_SYSTEM_PROMPT = `
 - 只能推荐 2 家，而且必须从提供的店铺列表里选择。
 - 不能编造任何营业时间、距离、价格、插座、安静程度或氛围事实。
 - 优先根据用户需求做判断，不要套模板，不要把所有店说成“都可以”。
-- 返回 JSON 对象，不要输出 Markdown 代码块，不要输出额外前言。
-- \`fitReasons\` 保持 2 到 3 条，\`tradeoffs\` 保持 1 到 2 条，全部用中文短句。
-- \`picks\` 里的两家不能重复。
-
-固定输出 JSON 结构：
-{
-  "parsedRequestSummary": "1 句，概括你理解到的需求",
-  "explanation": "1 句，说明为什么这次是这两家",
-  "comparisonNote": "1 句，区分两家分别更适合什么",
-  "tradeoffNote": "1 句，提醒这次推荐的取舍",
-  "picks": [
-    {
-      "id": "店铺 id",
-      "fitReasons": ["理由 1", "理由 2"],
-      "tradeoffs": ["取舍 1"]
-    },
-    {
-      "id": "店铺 id",
-      "fitReasons": ["理由 1", "理由 2"],
-      "tradeoffs": ["取舍 1"]
-    }
-  ]
-}
+- 直接输出自然中文，不要输出 JSON，不要输出 Markdown 表格，不要输出代码块。
+- 第一段就直接点名这次最推荐的 2 家。
+- 整体控制在 4 段以内，像聊天回复一样，简洁但要说清楚差别。
+- 如果用户在意插座，除了凯瑟琳星巴克，不要主动把别家说成插座友好。
 `.trim();
 
 export function buildCafeContextBlock() {
@@ -57,6 +38,6 @@ ${rawQuery}
 ${buildCafeContextBlock()}
 
 [Output Reminder]
-请从列表里选出最适合当前需求的 2 家，并严格返回约定 JSON。
+请直接流式输出一段适合出现在聊天框里的自然中文回复。
 `.trim();
 }

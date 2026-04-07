@@ -14,10 +14,10 @@ function run(name: string, assertion: () => void) {
   }
 }
 
-run("system prompt explicitly constrains the model to two cafes and JSON output", () => {
+run("system prompt explicitly constrains the model to two cafes and plain text output", () => {
   assert.match(MINIMAX_SYSTEM_PROMPT, /只能推荐 2 家/);
   assert.match(MINIMAX_SYSTEM_PROMPT, /不能编造任何/);
-  assert.match(MINIMAX_SYSTEM_PROMPT, /JSON/);
+  assert.match(MINIMAX_SYSTEM_PROMPT, /直接输出自然中文/);
 });
 
 run("recommendation prompt includes the raw query and all cafe ids", () => {
@@ -52,8 +52,8 @@ run("query parser detects study intent and socket preference", () => {
   assert.equal(parsed.quietNeed, "high");
 });
 
-run("recommendation prompt tells the model to choose from the provided cafes", () => {
+run("recommendation prompt asks for a chat-style reply from the provided cafes", () => {
   const prompt = buildRecommendationPrompt("想和朋友坐坐聊天，离学校近一点");
-  assert.match(prompt, /从列表里选出最适合当前需求的 2 家/);
+  assert.match(prompt, /流式输出/);
   assert.match(prompt, /\[Available Cafes\]/);
 });

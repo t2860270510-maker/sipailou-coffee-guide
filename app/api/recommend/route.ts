@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { getMiniMaxRuntimeSnapshot, recommendWithMiniMax } from "../../../lib/minimax";
+import { getMiniMaxRuntimeSnapshot, recommendWithMiniMaxStream } from "../../../lib/minimax";
 
 const requestSchema = z.object({
   query: z.string().trim().min(2, "请输入更完整一点的需求。"),
@@ -22,8 +22,7 @@ function toApiErrorMessage(error: unknown) {
 export async function POST(request: Request) {
   try {
     const payload = requestSchema.parse(await request.json());
-    const recommendation = await recommendWithMiniMax(payload.query);
-    return NextResponse.json(recommendation);
+    return await recommendWithMiniMaxStream(payload.query);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(

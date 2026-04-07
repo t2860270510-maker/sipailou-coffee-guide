@@ -1,25 +1,9 @@
 import { createHash } from "node:crypto";
 
-import { cafes } from "./cafes";
 import { buildRecommendationPrompt, MINIMAX_SYSTEM_PROMPT } from "./minimax-prompts";
-import { parseRecommendationQuery } from "./recommendation";
-import type { RankedCafe, RecommendationResult } from "./types";
 
 type MiniMaxSuccessResponse = {
   model?: string;
-  content?: Array<
-    | {
-        type: "text";
-        text: string;
-      }
-    | {
-        type: "thinking";
-        thinking: string;
-      }
-  >;
-};
-
-type MiniMaxErrorResponse = {
   error?: {
     message?: string;
     request_id?: string;
@@ -27,21 +11,6 @@ type MiniMaxErrorResponse = {
     code?: string;
   };
 };
-
-type MiniMaxRecommendationPayload = {
-  parsedRequestSummary: string;
-  explanation: string;
-  comparisonNote: string;
-  tradeoffNote: string;
-  picks: Array<{
-    id: string;
-    fitReasons: string[];
-    tradeoffs: string[];
-  }>;
-};
-
-const DEFAULT_MINIMAX_TIMEOUT_MS = 12000;
-const MAX_ATTEMPTS_PER_MODEL = 2;
 
 function getMiniMaxConfig() {
   const apiKey = process.env.MINIMAX_API_KEY ?? process.env.ANTHROPIC_API_KEY;
@@ -102,7 +71,7 @@ export function getMiniMaxRuntimeSnapshot() {
   };
 }
 
-function buildMiniMaxError(error: MiniMaxErrorResponse["error"], model: string) {
+function buildMiniMaxError(error: MiniMaxSuccessResponse["error"], model: string) {
   const message = error?.message ?? "MiniMax 请求失败。";
   const requestId = error?.request_id ? ` request_id=${error.request_id}` : "";
 
@@ -117,114 +86,16 @@ function buildMiniMaxError(error: MiniMaxErrorResponse["error"], model: string) 
   return new Error(`${message}${requestId}`);
 }
 
-function getRequestTimeoutMs() {
-  const rawValue = Number.parseInt(process.env.MINIMAX_TIMEOUT_MS ?? "", 10);
-  return Number.isFinite(rawValue) && rawValue >= 3000 ? rawValue : DEFAULT_MINIMAX_TIMEOUT_MS;
-}
-
-function isTimeoutError(error: unknown) {
+function shouldTryNextModel(error: unknown, currentModel: string, allModels: string[]) {
   if (!(error instanceof Error)) {
     return false;
   }
 
-  return (
-    error.name === "TimeoutError" ||
-    error.name === "AbortError" ||
-    /aborted due to timeout|timeout/i.test(error.message)
-  );
+  const hasNextModel = allModels.indexOf(currentModel) < allModels.length - 1;
+  return hasNextModel && /不可用|unknown_model|unable to find suitable provider/i.test(error.message);
 }
 
-function toUserFacingMiniMaxError(error: unknown) {
-  if (isTimeoutError(error)) {
-    return new Error("AI 推荐这次响应有点慢，请再试一次。");
-  }
-
-  if (error instanceof Error) {
-    return error;
-  }
-
-  return new Error("推荐服务暂时不可用，请稍后再试。");
-}
-
-function normalizeJsonPayload(text: string) {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenced?.[1]) {
-    return fenced[1].trim();
-  }
-
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start >= 0 && end > start) {
-    return text.slice(start, end + 1).trim();
-  }
-
-  return text.trim();
-}
-
-function isValidPick(pick: MiniMaxRecommendationPayload["picks"][number]) {
-  return (
-    typeof pick?.id === "string" &&
-    Array.isArray(pick.fitReasons) &&
-    pick.fitReasons.every((item) => typeof item === "string" && item.trim().length > 0) &&
-    Array.isArray(pick.tradeoffs) &&
-    pick.tradeoffs.every((item) => typeof item === "string" && item.trim().length > 0)
-  );
-}
-
-function parseRecommendationPayload(text: string): MiniMaxRecommendationPayload | null {
-  try {
-    const parsed = JSON.parse(normalizeJsonPayload(text)) as Partial<MiniMaxRecommendationPayload>;
-    if (
-      typeof parsed.parsedRequestSummary !== "string" ||
-      typeof parsed.explanation !== "string" ||
-      typeof parsed.comparisonNote !== "string" ||
-      typeof parsed.tradeoffNote !== "string" ||
-      !Array.isArray(parsed.picks) ||
-      parsed.picks.length !== 2 ||
-      !parsed.picks.every(isValidPick)
-    ) {
-      return null;
-    }
-
-    const uniqueIds = new Set(parsed.picks.map((pick) => pick.id));
-    if (uniqueIds.size !== 2) {
-      return null;
-    }
-
-    return {
-      parsedRequestSummary: parsed.parsedRequestSummary.trim(),
-      explanation: parsed.explanation.trim(),
-      comparisonNote: parsed.comparisonNote.trim(),
-      tradeoffNote: parsed.tradeoffNote.trim(),
-      picks: parsed.picks.map((pick) => ({
-        id: pick.id.trim(),
-        fitReasons: pick.fitReasons.map((item) => item.trim()).filter(Boolean).slice(0, 3),
-        tradeoffs: pick.tradeoffs.map((item) => item.trim()).filter(Boolean).slice(0, 2),
-      })),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function hydrateRankedCafes(picks: MiniMaxRecommendationPayload["picks"]): RankedCafe[] | null {
-  const hydrated = picks.map((pick) => {
-    const cafe = cafes.find((item) => item.id === pick.id);
-    if (!cafe) {
-      return null;
-    }
-
-    return {
-      cafe,
-      fitReasons: pick.fitReasons,
-      tradeoffs: pick.tradeoffs,
-    };
-  });
-
-  return hydrated.every(Boolean) ? (hydrated as RankedCafe[]) : null;
-}
-
-async function createMiniMaxMessage({
+async function createMiniMaxStream({
   apiKey,
   baseURL,
   model,
@@ -235,114 +106,136 @@ async function createMiniMaxMessage({
   model: string;
   prompt: string;
 }) {
-  try {
-    const response = await fetch(`${baseURL.replace(/\/$/, "")}/v1/messages`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      signal: AbortSignal.timeout(getRequestTimeoutMs()),
-      body: JSON.stringify({
-        model,
-        system: MINIMAX_SYSTEM_PROMPT,
-        max_tokens: 900,
-        temperature: 0.3,
-        messages: [
-          {
-            role: "user",
-            content: [{ type: "text", text: prompt }],
-          },
-        ],
-      }),
-    });
+  const response = await fetch(`${baseURL.replace(/\/$/, "")}/v1/messages`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model,
+      system: MINIMAX_SYSTEM_PROMPT,
+      max_tokens: 900,
+      temperature: 0.3,
+      stream: true,
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: prompt }],
+        },
+      ],
+    }),
+  });
 
-    const payload = (await response.json()) as MiniMaxSuccessResponse & MiniMaxErrorResponse;
-    if (response.ok) {
-      return payload;
-    }
-
-    throw buildMiniMaxError(payload.error, model);
-  } catch (error) {
-    throw toUserFacingMiniMaxError(error);
-  }
-}
-
-function shouldTryNextModel(error: unknown, currentModel: string, allModels: string[]) {
-  if (!(error instanceof Error)) {
-    return false;
+  if (response.ok && response.body) {
+    return response;
   }
 
-  const hasNextModel = allModels.indexOf(currentModel) < allModels.length - 1;
-  return hasNextModel && /不可用|unknown_model|unable to find suitable provider/i.test(error.message);
+  const payload = (await response.json().catch(() => ({}))) as MiniMaxSuccessResponse;
+  throw buildMiniMaxError(payload.error, model);
 }
 
-async function enhanceWithMiniMax(rawQuery: string): Promise<RecommendationResult> {
+function extractTextDelta(payload: Record<string, unknown>) {
+  const delta = payload.delta;
+  if (!delta || typeof delta !== "object") {
+    return "";
+  }
+
+  const text = (delta as { text?: unknown }).text;
+  return typeof text === "string" ? text : "";
+}
+
+function sseToTextStream(stream: ReadableStream<Uint8Array>) {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = stream.getReader();
+      let buffer = "";
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+
+          while (true) {
+            const boundary = buffer.indexOf("\n\n");
+            if (boundary === -1) {
+              break;
+            }
+
+            const rawEvent = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+
+            const data = rawEvent
+              .split(/\r?\n/)
+              .filter((line) => line.startsWith("data:"))
+              .map((line) => line.slice(5).trimStart())
+              .join("\n");
+
+            if (!data || data === "[DONE]") {
+              continue;
+            }
+
+            const payload = JSON.parse(data) as Record<string, unknown>;
+            const deltaText = extractTextDelta(payload);
+            if (deltaText) {
+              controller.enqueue(encoder.encode(deltaText));
+            }
+          }
+        }
+
+        const trailing = decoder.decode();
+        if (trailing) {
+          buffer += trailing;
+        }
+      } catch {
+        controller.enqueue(encoder.encode("\n\n抱歉，这次回复中断了，你可以再发一次。"));
+      } finally {
+        reader.releaseLock();
+        controller.close();
+      }
+    },
+  });
+}
+
+export async function recommendWithMiniMaxStream(rawQuery: string) {
   const config = getMiniMaxConfig();
   if (!config) {
-    throw new Error("当前版本的推荐需要可用的 MiniMax API Key，暂时不能回退到本地推荐。");
+    throw new Error("当前没有可用的模型配置。");
   }
 
   const prompt = buildRecommendationPrompt(rawQuery);
 
   for (const model of config.models) {
-    for (let attempt = 0; attempt < MAX_ATTEMPTS_PER_MODEL; attempt += 1) {
-      try {
-        const message = await createMiniMaxMessage({
-          apiKey: config.apiKey,
-          baseURL: config.baseURL,
-          model,
-          prompt,
-        });
+    try {
+      const response = await createMiniMaxStream({
+        apiKey: config.apiKey,
+        baseURL: config.baseURL,
+        model,
+        prompt,
+      });
 
-        const text = (message.content ?? [])
-          .filter((block): block is { type: "text"; text: string } => block.type === "text")
-          .map((block) => block.text)
-          .join("\n")
-          .trim();
-
-        if (!text) {
-          continue;
-        }
-
-        const parsed = parseRecommendationPayload(text);
-        if (!parsed) {
-          continue;
-        }
-
-        const topPicks = hydrateRankedCafes(parsed.picks);
-        if (!topPicks) {
-          continue;
-        }
-
-        return {
-          parsedRequest: parseRecommendationQuery(rawQuery),
-          parsedRequestSummary: parsed.parsedRequestSummary,
-          topPicks,
-          explanation: parsed.explanation,
-          comparisonNote: parsed.comparisonNote,
-          tradeoffNote: parsed.tradeoffNote,
-          modelUsed: message.model ?? model,
-        };
-      } catch (error) {
-        const canRetryCurrentModel = isTimeoutError(error) && attempt < MAX_ATTEMPTS_PER_MODEL - 1;
-        if (canRetryCurrentModel) {
-          continue;
-        }
-
-        if (shouldTryNextModel(error, model, config.models)) {
-          break;
-        }
-
-        throw error;
+      return new Response(sseToTextStream(response.body as ReadableStream<Uint8Array>), {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store",
+        },
+      });
+    } catch (error) {
+      if (shouldTryNextModel(error, model, config.models)) {
+        continue;
       }
+
+      throw error;
     }
   }
 
-  throw new Error("模型没有返回可用的推荐结果，请稍后再试。");
-}
-
-export async function recommendWithMiniMax(rawQuery: string): Promise<RecommendationResult> {
-  return enhanceWithMiniMax(rawQuery);
+  throw new Error("模型暂时不可用，请稍后再试。");
 }
