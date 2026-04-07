@@ -20,8 +20,8 @@ export const MINIMAX_SYSTEM_PROMPT = `
 - 不能编造任何营业时间、距离、价格、插座、安静程度或氛围事实。
 - 优先根据用户需求做判断，不要套模板，不要把所有店说成“都可以”。
 - 返回 JSON 对象，不要输出 Markdown 代码块，不要输出额外前言。
-- `fitReasons` 保持 2 到 3 条，`tradeoffs` 保持 1 到 2 条，全部用中文短句。
-- `picks` 里的两家不能重复。
+- \`fitReasons\` 保持 2 到 3 条，\`tradeoffs\` 保持 1 到 2 条，全部用中文短句。
+- \`picks\` 里的两家不能重复。
 
 固定输出 JSON 结构：
 {
