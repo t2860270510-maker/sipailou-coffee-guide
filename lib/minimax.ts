@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 
-import { buildMiniMaxNarrativePrompt, MINIMAX_SYSTEM_PROMPT } from "./minimax-prompts";
-import { buildLocalRecommendation } from "./recommendation";
-import type { RecommendationResult } from "./types";
+import { cafes } from "./cafes";
+import { buildRecommendationPrompt, MINIMAX_SYSTEM_PROMPT } from "./minimax-prompts";
+import { parseRecommendationQuery } from "./recommendation";
+import type { RankedCafe, RecommendationResult } from "./types";
 
 type MiniMaxSuccessResponse = {
   model?: string;
@@ -27,10 +28,16 @@ type MiniMaxErrorResponse = {
   };
 };
 
-type MiniMaxNarrative = {
+type MiniMaxRecommendationPayload = {
+  parsedRequestSummary: string;
   explanation: string;
   comparisonNote: string;
   tradeoffNote: string;
+  picks: Array<{
+    id: string;
+    fitReasons: string[];
+    tradeoffs: string[];
+  }>;
 };
 
 function getMiniMaxConfig() {
@@ -107,27 +114,82 @@ function buildMiniMaxError(error: MiniMaxErrorResponse["error"], model: string) 
   return new Error(`${message}${requestId}`);
 }
 
-function parseNarrativeText(text: string): MiniMaxNarrative | null {
-  const lines = text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const findLine = (prefix: string) => lines.find((line) => line.startsWith(prefix))?.slice(prefix.length).trim();
-
-  const explanation = findLine("概述：");
-  const comparisonNote = findLine("对比：");
-  const tradeoffNote = findLine("提醒：");
-
-  if (!explanation || !comparisonNote || !tradeoffNote) {
-    return null;
+function normalizeJsonPayload(text: string) {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    return fenced[1].trim();
   }
 
-  return {
-    explanation,
-    comparisonNote,
-    tradeoffNote,
-  };
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    return text.slice(start, end + 1).trim();
+  }
+
+  return text.trim();
+}
+
+function isValidPick(pick: MiniMaxRecommendationPayload["picks"][number]) {
+  return (
+    typeof pick?.id === "string" &&
+    Array.isArray(pick.fitReasons) &&
+    pick.fitReasons.every((item) => typeof item === "string" && item.trim().length > 0) &&
+    Array.isArray(pick.tradeoffs) &&
+    pick.tradeoffs.every((item) => typeof item === "string" && item.trim().length > 0)
+  );
+}
+
+function parseRecommendationPayload(text: string): MiniMaxRecommendationPayload | null {
+  try {
+    const parsed = JSON.parse(normalizeJsonPayload(text)) as Partial<MiniMaxRecommendationPayload>;
+    if (
+      typeof parsed.parsedRequestSummary !== "string" ||
+      typeof parsed.explanation !== "string" ||
+      typeof parsed.comparisonNote !== "string" ||
+      typeof parsed.tradeoffNote !== "string" ||
+      !Array.isArray(parsed.picks) ||
+      parsed.picks.length !== 2 ||
+      !parsed.picks.every(isValidPick)
+    ) {
+      return null;
+    }
+
+    const uniqueIds = new Set(parsed.picks.map((pick) => pick.id));
+    if (uniqueIds.size !== 2) {
+      return null;
+    }
+
+    return {
+      parsedRequestSummary: parsed.parsedRequestSummary.trim(),
+      explanation: parsed.explanation.trim(),
+      comparisonNote: parsed.comparisonNote.trim(),
+      tradeoffNote: parsed.tradeoffNote.trim(),
+      picks: parsed.picks.map((pick) => ({
+        id: pick.id.trim(),
+        fitReasons: pick.fitReasons.map((item) => item.trim()).filter(Boolean).slice(0, 3),
+        tradeoffs: pick.tradeoffs.map((item) => item.trim()).filter(Boolean).slice(0, 2),
+      })),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function hydrateRankedCafes(picks: MiniMaxRecommendationPayload["picks"]): RankedCafe[] | null {
+  const hydrated = picks.map((pick) => {
+    const cafe = cafes.find((item) => item.id === pick.id);
+    if (!cafe) {
+      return null;
+    }
+
+    return {
+      cafe,
+      fitReasons: pick.fitReasons,
+      tradeoffs: pick.tradeoffs,
+    };
+  });
+
+  return hydrated.every(Boolean) ? (hydrated as RankedCafe[]) : null;
 }
 
 async function createMiniMaxMessage({
@@ -152,8 +214,8 @@ async function createMiniMaxMessage({
     body: JSON.stringify({
       model,
       system: MINIMAX_SYSTEM_PROMPT,
-      max_tokens: 220,
-      temperature: 0.2,
+      max_tokens: 900,
+      temperature: 0.3,
       messages: [
         {
           role: "user",
@@ -180,13 +242,13 @@ function shouldTryNextModel(error: unknown, currentModel: string, allModels: str
   return hasNextModel && /不可用|unknown_model|unable to find suitable provider/i.test(error.message);
 }
 
-async function enhanceWithMiniMax(rawQuery: string, recommendation: RecommendationResult) {
+async function enhanceWithMiniMax(rawQuery: string): Promise<RecommendationResult> {
   const config = getMiniMaxConfig();
   if (!config) {
-    return null;
+    throw new Error("当前版本的推荐需要可用的 MiniMax API Key，暂时不能回退到本地推荐。");
   }
 
-  const prompt = buildMiniMaxNarrativePrompt(rawQuery, recommendation);
+  const prompt = buildRecommendationPrompt(rawQuery);
 
   for (const model of config.models) {
     try {
@@ -207,13 +269,23 @@ async function enhanceWithMiniMax(rawQuery: string, recommendation: Recommendati
         continue;
       }
 
-      const parsed = parseNarrativeText(text);
+      const parsed = parseRecommendationPayload(text);
       if (!parsed) {
         continue;
       }
 
+      const topPicks = hydrateRankedCafes(parsed.picks);
+      if (!topPicks) {
+        continue;
+      }
+
       return {
-        ...parsed,
+        parsedRequest: parseRecommendationQuery(rawQuery),
+        parsedRequestSummary: parsed.parsedRequestSummary,
+        topPicks,
+        explanation: parsed.explanation,
+        comparisonNote: parsed.comparisonNote,
+        tradeoffNote: parsed.tradeoffNote,
         modelUsed: message.model ?? model,
       };
     } catch (error) {
@@ -221,26 +293,13 @@ async function enhanceWithMiniMax(rawQuery: string, recommendation: Recommendati
         continue;
       }
 
-      return null;
+      throw error;
     }
   }
 
-  return null;
+  throw new Error("模型没有返回可用的推荐结果，请稍后再试。");
 }
 
 export async function recommendWithMiniMax(rawQuery: string): Promise<RecommendationResult> {
-  const localRecommendation = buildLocalRecommendation(rawQuery);
-  const enhanced = await enhanceWithMiniMax(rawQuery, localRecommendation);
-
-  if (!enhanced) {
-    return localRecommendation;
-  }
-
-  return {
-    ...localRecommendation,
-    explanation: enhanced.explanation,
-    comparisonNote: enhanced.comparisonNote,
-    tradeoffNote: enhanced.tradeoffNote,
-    modelUsed: `${enhanced.modelUsed} + local picks`,
-  };
+  return enhanceWithMiniMax(rawQuery);
 }

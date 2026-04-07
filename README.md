@@ -28,7 +28,7 @@
 ## Notes
 
 - 前端不会直接暴露 API key，模型请求统一走 `/api/recommend`。
-- 当前接入的是“本地选店 + MiniMax 润色说明”的混合链路，默认优先使用 `MiniMax-M2.7`。
+- 当前接入的是“API 调模型直接选店并生成说明”的链路，默认优先使用 `MiniMax-M2.7`。
 - `MiniMax-M2.7` 需要 Token Plan Key；如果你使用的是普通接口 Key，请把 `MINIMAX_MODEL` 改成 `MiniMax-M2.5`，或保留默认回退配置 `MINIMAX_FALLBACK_MODELS=MiniMax-M2.5`。
-- 即使 MiniMax 临时超时、返回格式不稳定或没有配置 API Key，页面也会先给出本地稳定的两家推荐，不会整段卡死。
+- 如果 MiniMax 临时超时、返回格式不稳定或没有配置 API Key，接口会直接返回错误提示，不再回退到本地推荐逻辑。
 - 提示词与模型润色逻辑定义在 `lib/minimax-prompts.ts` 和 `lib/minimax.ts`。

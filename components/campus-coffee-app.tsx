@@ -24,12 +24,12 @@ const heroSignals = [
     body: "直接说场景，不需要先选筛选器。",
   },
   {
-    label: "拿到两家",
-    body: "先给你两个清晰答案，不把页面变成长榜单。",
+    label: "像聊天一样问",
+    body: "API 返回 AI 的判断结果，不再先走本地打分再包装文案。",
   },
   {
     label: "再看细节",
-    body: "点开店铺卡片，就能继续看营业时间、插座和推荐品类。",
+    body: "点开店铺卡片，就能继续看营业时间、推荐品类和编辑观察。",
   },
 ];
 
@@ -65,7 +65,7 @@ const initialConversation: ConversationItem[] = [
     role: "assistant",
     type: "intro",
     content:
-      "说一句你现在的需求，我会在对话里直接给你 2 家更合适的店，并解释它们分别适合什么。",
+      "说一句你现在的需求，我会像 chatbot 一样直接回你 2 家更合适的店，并解释它们分别适合什么。",
   },
 ];
 
@@ -88,14 +88,6 @@ function formatScene(scene: Cafe["mainScene"]) {
 }
 
 function formatModelLabel(modelUsed: string) {
-  if (modelUsed === "Local fallback") {
-    return "本地稳定推荐";
-  }
-
-  if (modelUsed.endsWith("+ local picks")) {
-    return `${modelUsed.replace(" + local picks", "")} 润色`;
-  }
-
   return modelUsed;
 }
 
@@ -142,7 +134,7 @@ export function CampusCoffeeApp({
     setConversation((current) => [
       ...current,
       { id: `user-${Date.now()}`, role: "user", type: "text", content: payload },
-      { id: loadingId, role: "assistant", type: "loading", content: "正在比对更适合的两家店..." },
+      { id: loadingId, role: "assistant", type: "loading", content: "正在理解你的需求，并挑出更合适的两家店..." },
     ]);
     setQuery("");
 
@@ -199,7 +191,7 @@ export function CampusCoffeeApp({
                 <h2>直接说你的场景</h2>
               </div>
               <span className="panel-status">
-                {isSubmitting ? "正在推理" : isPending ? "更新中" : "在线"}
+                {isSubmitting ? "正在回复" : isPending ? "更新中" : "在线"}
               </span>
             </div>
 
@@ -316,9 +308,9 @@ export function CampusCoffeeApp({
                   onClick={() => void submitPrompt()}
                   disabled={isSubmitting}
                 >
-                  {isSubmitting ? "正在推荐..." : "发送需求"}
+                  {isSubmitting ? "正在回复..." : "发送消息"}
                 </button>
-                <p className="helper-copy">我会只给你两家，并清楚说明各自更适合什么。</p>
+                <p className="helper-copy">我会像聊天一样只回你两家，并清楚说明各自更适合什么。</p>
               </div>
 
               {formError ? <p className="form-error">{formError}</p> : null}
@@ -330,11 +322,11 @@ export function CampusCoffeeApp({
               <p className="eyebrow">Sipailou Coffee Companion</p>
               <h1>今天去哪家坐一会？</h1>
               <p className="hero-intro">
-                输入一句真实需求，让模型直接从 8 家店里选出更贴近你当下场景的 2 家。
+                输入一句真实需求，让 API 调模型直接从 8 家店里选出更贴近你当下场景的 2 家。
               </p>
               <div className="hero-microcopy">
                 <span>对话式交互</span>
-                <span>模型直推两家</span>
+                <span>AI 直接选店</span>
                 <span>真实店铺观察</span>
               </div>
             </div>
@@ -446,7 +438,9 @@ export function CampusCoffeeApp({
                     <button className="text-button" type="button" onClick={() => setSelectedCafe(cafe)}>
                       打开店铺观察
                     </button>
-                    <span className="meta-inline">{formatSocket(cafe.socketLevel)}</span>
+                    {cafe.id === "katherine-starbucks" ? (
+                      <span className="meta-inline">{formatSocket(cafe.socketLevel)}</span>
+                    ) : null}
                   </div>
                 </div>
               </article>
@@ -502,10 +496,12 @@ export function CampusCoffeeApp({
                   <dt>预算等级</dt>
                   <dd>{formatPrice(selectedCafe.priceLevel)}</dd>
                 </div>
-                <div>
-                  <dt>插座情况</dt>
-                  <dd>{formatSocket(selectedCafe.socketLevel)}</dd>
-                </div>
+                {selectedCafe.id === "katherine-starbucks" ? (
+                  <div>
+                    <dt>插座情况</dt>
+                    <dd>{formatSocket(selectedCafe.socketLevel)}</dd>
+                  </div>
+                ) : null}
               </dl>
 
               <div className="drawer-section">

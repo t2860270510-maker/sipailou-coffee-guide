@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { cafes } from "../lib/cafes";
 import { buildCafeContextBlock, buildRecommendationPrompt, MINIMAX_SYSTEM_PROMPT } from "../lib/minimax-prompts";
-import { buildLocalRecommendation, getGuideGroupMatches, parseRecommendationQuery } from "../lib/recommendation";
+import { getGuideGroupMatches, parseRecommendationQuery } from "../lib/recommendation";
 
 function run(name: string, assertion: () => void) {
   try {
@@ -14,9 +14,10 @@ function run(name: string, assertion: () => void) {
   }
 }
 
-run("system prompt explicitly constrains the model to two cafes", () => {
+run("system prompt explicitly constrains the model to two cafes and JSON output", () => {
   assert.match(MINIMAX_SYSTEM_PROMPT, /只能推荐 2 家/);
   assert.match(MINIMAX_SYSTEM_PROMPT, /不能编造任何/);
+  assert.match(MINIMAX_SYSTEM_PROMPT, /JSON/);
 });
 
 run("recommendation prompt includes the raw query and all cafe ids", () => {
@@ -51,9 +52,8 @@ run("query parser detects study intent and socket preference", () => {
   assert.equal(parsed.quietNeed, "high");
 });
 
-run("local recommendation returns two picks without calling the model", () => {
-  const recommendation = buildLocalRecommendation("明早早八前想顺路买一杯，别太贵");
-  assert.equal(recommendation.topPicks.length, 2);
-  assert.ok(recommendation.topPicks[0]?.fitReasons.length >= 2);
-  assert.match(recommendation.modelUsed, /Local fallback/);
+run("recommendation prompt tells the model to choose from the provided cafes", () => {
+  const prompt = buildRecommendationPrompt("想和朋友坐坐聊天，离学校近一点");
+  assert.match(prompt, /从列表里选出最适合当前需求的 2 家/);
+  assert.match(prompt, /\[Available Cafes\]/);
 });
