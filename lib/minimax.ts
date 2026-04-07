@@ -27,6 +27,12 @@ type MiniMaxErrorResponse = {
   };
 };
 
+type MiniMaxNarrative = {
+  explanation: string;
+  comparisonNote: string;
+  tradeoffNote: string;
+};
+
 function getMiniMaxConfig() {
   const apiKey = process.env.MINIMAX_API_KEY ?? process.env.ANTHROPIC_API_KEY;
   const apiKeySource = process.env.MINIMAX_API_KEY
@@ -101,7 +107,7 @@ function buildMiniMaxError(error: MiniMaxErrorResponse["error"], model: string) 
   return new Error(`${message}${requestId}`);
 }
 
-function parseNarrativeText(text: string) {
+function parseNarrativeText(text: string): MiniMaxNarrative | null {
   const lines = text
     .split("\n")
     .map((line) => line.trim())
@@ -109,10 +115,18 @@ function parseNarrativeText(text: string) {
 
   const findLine = (prefix: string) => lines.find((line) => line.startsWith(prefix))?.slice(prefix.length).trim();
 
+  const explanation = findLine("概述：");
+  const comparisonNote = findLine("对比：");
+  const tradeoffNote = findLine("提醒：");
+
+  if (!explanation || !comparisonNote || !tradeoffNote) {
+    return null;
+  }
+
   return {
-    explanation: findLine("概述："),
-    comparisonNote: findLine("对比："),
-    tradeoffNote: findLine("提醒："),
+    explanation,
+    comparisonNote,
+    tradeoffNote,
   };
 }
 
@@ -194,7 +208,7 @@ async function enhanceWithMiniMax(rawQuery: string, recommendation: Recommendati
       }
 
       const parsed = parseNarrativeText(text);
-      if (!parsed.explanation || !parsed.comparisonNote || !parsed.tradeoffNote) {
+      if (!parsed) {
         continue;
       }
 
