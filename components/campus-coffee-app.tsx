@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useDeferredValue, useEffect, useRef, useState, useTransition } from "react";
+import { useDeferredValue, useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 
 import { getGuideGroupMatches } from "../lib/recommendation";
 import type {
@@ -17,21 +17,6 @@ const scenarioPrompts = [
   "想和朋友坐坐聊天，离学校近一点",
 ];
 
-const heroSignals = [
-  {
-    label: "输入一句",
-    body: "直接说场景，不需要先选筛选器。",
-  },
-  {
-    label: "像聊天一样问",
-    body: "API 返回 AI 的判断结果，不再先走本地打分再包装文案。",
-  },
-  {
-    label: "再看细节",
-    body: "点开店铺卡片，就能继续看营业时间、推荐品类和编辑观察。",
-  },
-];
-
 type ConversationItem = {
   id: string;
   role: "assistant" | "user";
@@ -45,7 +30,7 @@ const initialConversation: ConversationItem[] = [
     role: "assistant",
     type: "intro",
     content:
-      "说一句你现在的需求，我会像 chatbot 一样直接回你 2 家更合适的店，并解释它们分别适合什么。",
+      "说一句你现在的需求，我会直接给你两家更合适的店，并把各自适合的理由说明白。",
   },
 ];
 
@@ -112,6 +97,8 @@ export function CampusCoffeeApp({
   const [isPending, startTransition] = useTransition();
   const chatLogRef = useRef<HTMLDivElement | null>(null);
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
+  const hasTypedQuery = query.trim().length > 0;
+  const showQuickPrompts = !hasTypedQuery && conversation.length <= initialConversation.length;
 
   const activeGroupMeta = guideGroups.find((group) => group.id === deferredGuideGroup) ?? guideGroups[0];
   const visibleCafes = getGuideGroupMatches(deferredGuideGroup);
@@ -119,6 +106,54 @@ export function CampusCoffeeApp({
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: isSubmitting ? "auto" : "smooth", block: "end" });
   }, [conversation, isPending, isSubmitting]);
+
+  useEffect(() => {
+    document.body.classList.add("motion-ready");
+
+    const elements = Array.from(document.querySelectorAll<HTMLElement>("[data-reveal]"));
+    if (!elements.length || typeof IntersectionObserver === "undefined") {
+      elements.forEach((element) => element.classList.add("is-visible"));
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("is-visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      {
+        threshold: 0.16,
+        rootMargin: "0px 0px -8% 0px",
+      },
+    );
+
+    elements.forEach((element) => observer.observe(element));
+
+    return () => observer.disconnect();
+  }, [deferredGuideGroup]);
+
+  useEffect(() => {
+    if (!selectedCafe) return;
+
+    document.body.classList.add("drawer-open");
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSelectedCafe(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.classList.remove("drawer-open");
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [selectedCafe]);
 
   async function submitPrompt(nextQuery?: string) {
     const payload = (nextQuery ?? query).trim();
@@ -207,10 +242,16 @@ export function CampusCoffeeApp({
 
   return (
     <main className="page-shell">
+      <section className="page-masthead" data-reveal style={{ "--reveal-delay": "40ms" } as CSSProperties}>
+        <p className="eyebrow">Sipailou Coffee Companion</p>
+        <h1>今天喝点什么</h1>
+        <p className="masthead-intro">一句当下心境，换两家更值得停留的地方。</p>
+      </section>
+
       <section className="hero-section">
         <div className="hero-backdrop" />
         <div className="hero-grid">
-          <div className="chat-shell">
+          <div className="chat-shell" data-reveal style={{ "--reveal-delay": "120ms" } as CSSProperties}>
             <div className="chat-head">
               <div>
                 <p className="eyebrow">AI Concierge</p>
@@ -228,7 +269,7 @@ export function CampusCoffeeApp({
                     key={item.id}
                     className={`message ${item.role === "user" ? "message-user" : "message-assistant"}`}
                   >
-                    <p className="message-label">{item.role === "user" ? "You" : "Assistant"}</p>
+                    <p className="message-label">{item.role === "user" ? "你" : "Assistant"}</p>
                     <p className={`message-text ${item.type === "streaming" ? "message-streaming" : ""}`}>
                       {item.content}
                     </p>
@@ -255,22 +296,24 @@ export function CampusCoffeeApp({
                     }
                   }}
                   rows={3}
-                  placeholder="例如：下午想写论文，预算别太高，最好安静一点。"
+                  placeholder={hasTypedQuery ? "" : "例如：下午想写论文，预算别太高，最好安静一点。"}
                 />
               </label>
 
-              <div className="quick-prompts" aria-label="快捷场景">
-                {scenarioPrompts.map((prompt) => (
-                  <button
-                    key={prompt}
-                    className="prompt-chip"
-                    type="button"
-                    onClick={() => void submitPrompt(prompt)}
-                  >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
+              {showQuickPrompts ? (
+                <div className="quick-prompts" aria-label="快捷场景">
+                  {scenarioPrompts.map((prompt) => (
+                    <button
+                      key={prompt}
+                      className="prompt-chip"
+                      type="button"
+                      onClick={() => void submitPrompt(prompt)}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
 
               <div className="composer-actions">
                 <button
@@ -281,46 +324,44 @@ export function CampusCoffeeApp({
                 >
                   {isSubmitting ? "正在回复..." : "发送消息"}
                 </button>
-                <p className="helper-copy">我会像聊天一样只回你两家，并清楚说明各自更适合什么。</p>
+                <p className="helper-copy">不铺陈，不兜圈，只留下更贴近当下的两家。</p>
               </div>
 
               {formError ? <p className="form-error">{formError}</p> : null}
             </div>
           </div>
 
-          <div className="hero-copy">
+          <div className="hero-copy" data-reveal style={{ "--reveal-delay": "200ms" } as CSSProperties}>
             <div className="hero-copy-top">
-              <p className="eyebrow">Sipailou Coffee Companion</p>
-              <h1>今天去哪家坐一会？</h1>
+              <p className="eyebrow">Scene Selection</p>
+              <h2>先说此刻，再决定去哪一间。</h2>
               <p className="hero-intro">
-                输入一句真实需求，让 API 调模型直接从 8 家店里选出更贴近你当下场景的 2 家。
+                把赶时间、想独处、要见人，或只是想认真喝一杯的念头说清楚，
+                答案就不必在一攒店名里反复比较。
               </p>
               <div className="hero-microcopy">
-                <span>对话式交互</span>
-                <span>AI 直接选店</span>
-                <span>真实店铺观察</span>
+                <span>先说场景</span>
+                <span>只给两家</span>
+                <span>再看观察</span>
               </div>
             </div>
 
-            <div className="hero-brief">
-              {heroSignals.map((signal, index) => (
-                <article key={signal.label} className="hero-brief-card">
-                  <span className="hero-brief-index">0{index + 1}</span>
-                  <div>
-                    <h3>{signal.label}</h3>
-                    <p>{signal.body}</p>
-                  </div>
-                </article>
-              ))}
-            </div>
+            <article className="hero-note">
+              <p>不是把选择做多，而是把犹豫缩短。</p>
+            </article>
 
             <div className="editorial-inline">
-              {editorialMoments.map((moment) => {
+              {editorialMoments.map((moment, index) => {
                 const cafe = cafes.find((item) => item.id === moment.cafeId);
                 if (!cafe) return null;
 
                 return (
-                  <article key={moment.title} className="editorial-inline-card">
+                  <article
+                    key={moment.title}
+                    className="editorial-inline-card"
+                    data-reveal
+                    style={{ "--reveal-delay": `${260 + index * 70}ms` } as CSSProperties}
+                  >
                     <p className="eyebrow">{moment.title}</p>
                     <h3>{cafe.name}</h3>
                     <p>{moment.body}</p>
@@ -332,7 +373,7 @@ export function CampusCoffeeApp({
         </div>
       </section>
 
-      <section className="guide-section">
+      <section className="guide-section" data-reveal style={{ "--reveal-delay": "60ms" } as CSSProperties}>
         <div className="section-heading guide-heading">
           <div>
             <p className="eyebrow">Coffee Guide</p>
@@ -364,9 +405,14 @@ export function CampusCoffeeApp({
             </div>
           </aside>
 
-          <div className="guide-flow">
-            {visibleCafes.map((cafe) => (
-              <article key={cafe.id} className="cafe-card">
+          <div key={deferredGuideGroup} className="guide-flow">
+            {visibleCafes.map((cafe, index) => (
+              <article
+                key={cafe.id}
+                className="cafe-card"
+                data-reveal
+                style={{ "--reveal-delay": `${index * 90}ms` } as CSSProperties}
+              >
                 <div className="cafe-image-wrap">
                   <Image
                     src={cafe.coverImage}
@@ -424,6 +470,9 @@ export function CampusCoffeeApp({
         <div className="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="detail-title">
           <button className="drawer-backdrop" type="button" onClick={() => setSelectedCafe(null)} aria-label="关闭详情" />
           <div className="drawer-panel">
+            <button className="drawer-mobile-close" type="button" onClick={() => setSelectedCafe(null)}>
+              返回
+            </button>
             <div className="drawer-media">
               <Image
                 src={selectedCafe.coverImage}
@@ -440,7 +489,7 @@ export function CampusCoffeeApp({
                   <h2 id="detail-title">{selectedCafe.name}</h2>
                 </div>
                 <button className="close-button" type="button" onClick={() => setSelectedCafe(null)}>
-                  关闭
+                  关闭观察
                 </button>
               </div>
 
