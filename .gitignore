@@ -1,0 +1,9 @@
+.DS_Store
+.next
+node_modules
+.env.local
+coverage
+dist
+out
+.vercel
+.netlify

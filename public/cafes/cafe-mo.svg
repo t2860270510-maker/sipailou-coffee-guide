@@ -1,0 +1,10 @@
+<svg width="1200" height="900" viewBox="0 0 1200 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="900" fill="#3A241A"/>
+  <circle cx="990" cy="174" r="240" fill="#C89664" fill-opacity="0.38"/>
+  <rect x="68" y="610" width="1064" height="182" rx="91" fill="#F0DECA" fill-opacity="0.12"/>
+  <path d="M0 0H1200V356C1015 430 829 442 642 392C455 342 241 306 0 390V0Z" fill="#F8EFE6" fill-opacity="0.06"/>
+  <text x="84" y="162" fill="#F5ECDD" font-family="Georgia, serif" font-size="40" letter-spacing="8">WINDOW BAR</text>
+  <text x="84" y="520" fill="#FFF6EA" font-family="Georgia, serif" font-size="140" letter-spacing="-4">Cafe</text>
+  <text x="84" y="646" fill="#FFF6EA" font-family="Georgia, serif" font-size="140" letter-spacing="-4">Mo</text>
+  <text x="88" y="744" fill="#E3D4BF" font-family="Arial, sans-serif" font-size="30" letter-spacing="4">LOW BUDGET · NOVEL DRINKS · TAKEAWAY</text>
+</svg>

@@ -1,0 +1,10 @@
+<svg width="1200" height="900" viewBox="0 0 1200 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="900" fill="#231915"/>
+  <circle cx="226" cy="198" r="188" fill="#E2C39B" fill-opacity="0.18"/>
+  <circle cx="980" cy="700" r="286" fill="#8D6A4F" fill-opacity="0.38"/>
+  <path d="M0 744C184 638 378 605 580 644C782 683 989 764 1200 700V900H0V744Z" fill="#F5EBDC" fill-opacity="0.12"/>
+  <text x="84" y="150" fill="#F5ECDD" font-family="Georgia, serif" font-size="38" letter-spacing="8">CITY STREET</text>
+  <text x="84" y="490" fill="#FFF6EA" font-family="Georgia, serif" font-size="132" letter-spacing="-4">Joymean</text>
+  <text x="84" y="618" fill="#FFF6EA" font-family="Georgia, serif" font-size="132" letter-spacing="-4">Coffee</text>
+  <text x="88" y="734" fill="#E3D4BF" font-family="Arial, sans-serif" font-size="30" letter-spacing="4">QUALITY BEANS · LATTE · HAND BREW</text>
+</svg>

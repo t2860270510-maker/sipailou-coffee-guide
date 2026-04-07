@@ -1,0 +1,10 @@
+<svg width="1200" height="900" viewBox="0 0 1200 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="900" fill="#2A1C17"/>
+  <rect x="66" y="72" width="1068" height="756" rx="36" fill="#F8EDE0" fill-opacity="0.06"/>
+  <circle cx="1022" cy="250" r="190" fill="#B98A57" fill-opacity="0.34"/>
+  <text x="96" y="178" fill="#F4EADB" font-family="Georgia, serif" font-size="38" letter-spacing="8">CHAIN PICK</text>
+  <text x="96" y="492" fill="#FFF5E9" font-family="Georgia, serif" font-size="160" letter-spacing="-6">Manner</text>
+  <text x="100" y="620" fill="#E5D6C3" font-family="Arial, sans-serif" font-size="32" letter-spacing="4">BRING YOUR CUP · EAST GATE · RELIABLE</text>
+  <path d="M96 684H540" stroke="#E8D5BC" stroke-opacity="0.64" stroke-width="6" stroke-linecap="round"/>
+  <path d="M96 730H468" stroke="#E8D5BC" stroke-opacity="0.34" stroke-width="6" stroke-linecap="round"/>
+</svg>

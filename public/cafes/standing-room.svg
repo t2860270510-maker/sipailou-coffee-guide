@@ -1,0 +1,10 @@
+<svg width="1200" height="900" viewBox="0 0 1200 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="900" fill="#2E1D14"/>
+  <circle cx="915" cy="208" r="220" fill="#8E694A" fill-opacity="0.45"/>
+  <circle cx="278" cy="702" r="254" fill="#D7B184" fill-opacity="0.22"/>
+  <path d="M0 620C195 518 379 490 552 536C725 582 941 699 1200 612V900H0V620Z" fill="#E7D2B3" fill-opacity="0.12"/>
+  <text x="84" y="162" fill="#F5ECDD" font-family="Georgia, serif" font-size="40" letter-spacing="8">SIPALOU GUIDE</text>
+  <text x="84" y="512" fill="#FFF6EA" font-family="Georgia, serif" font-size="118" letter-spacing="-2">STANDING</text>
+  <text x="84" y="632" fill="#FFF6EA" font-family="Georgia, serif" font-size="118" letter-spacing="-2">ROOM</text>
+  <text x="88" y="730" fill="#E3D4BF" font-family="Arial, sans-serif" font-size="30" letter-spacing="4">7:00 OPEN · SOUTH GATE · QUICK COFFEE</text>
+</svg>

@@ -1,0 +1,28 @@
+{
+  "name": "sipailou-coffee-guide",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "20.x"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "node --experimental-strip-types ./tests/recommendation.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0",
+    "next": "^16.2.2",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}

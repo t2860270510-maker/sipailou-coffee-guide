@@ -1,0 +1,9 @@
+<svg width="1200" height="900" viewBox="0 0 1200 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="900" fill="#261B15"/>
+  <rect x="720" y="86" width="322" height="322" rx="40" fill="#E6D5BE" fill-opacity="0.18"/>
+  <rect x="818" y="182" width="322" height="322" rx="40" fill="#B98C5B" fill-opacity="0.22"/>
+  <text x="88" y="160" fill="#F4EBDC" font-family="Georgia, serif" font-size="38" letter-spacing="8">CORNER STORE</text>
+  <text x="88" y="504" fill="#FFF5EA" font-family="Georgia, serif" font-size="148" letter-spacing="-5">clip</text>
+  <text x="88" y="628" fill="#FFF5EA" font-family="Georgia, serif" font-size="148" letter-spacing="-5">coffee</text>
+  <text x="92" y="740" fill="#E4D6C2" font-family="Arial, sans-serif" font-size="30" letter-spacing="4">WHITE FACADE · DESIGN MOOD · SIGNATURES</text>
+</svg>
