@@ -4,6 +4,11 @@ import { buildRecommendationPrompt, MINIMAX_SYSTEM_PROMPT } from "./minimax-prom
 
 type MiniMaxSuccessResponse = {
   model?: string;
+  content?: Array<{
+    type?: string;
+    text?: string;
+    thinking?: string;
+  }>;
   error?: {
     message?: string;
     request_id?: string;
@@ -146,6 +151,64 @@ function extractTextDelta(payload: Record<string, unknown>) {
   return typeof text === "string" ? text : "";
 }
 
+export function extractMiniMaxText(content: MiniMaxSuccessResponse["content"] | null | undefined) {
+  if (!content?.length) {
+    return "";
+  }
+
+  return content
+    .map((block) => (block?.type === "text" && typeof block.text === "string" ? block.text : ""))
+    .join("")
+    .trim();
+}
+
+async function createMiniMaxText({
+  apiKey,
+  baseURL,
+  model,
+  prompt,
+}: {
+  apiKey: string;
+  baseURL: string;
+  model: string;
+  prompt: string;
+}) {
+  const response = await fetch(`${baseURL.replace(/\/$/, "")}/v1/messages`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model,
+      system: MINIMAX_SYSTEM_PROMPT,
+      max_tokens: 900,
+      temperature: 0.3,
+      stream: false,
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: prompt }],
+        },
+      ],
+    }),
+  });
+
+  const payload = (await response.json().catch(() => ({}))) as MiniMaxSuccessResponse;
+
+  if (!response.ok) {
+    throw buildMiniMaxError(payload.error, model);
+  }
+
+  const text = extractMiniMaxText(payload.content);
+  if (text) {
+    return text;
+  }
+
+  throw new Error("模型返回了空内容。");
+}
+
 function sseToTextStream(stream: ReadableStream<Uint8Array>) {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -214,6 +277,8 @@ export async function recommendWithMiniMaxStream(rawQuery: string) {
   const prompt = buildRecommendationPrompt(rawQuery);
 
   for (const model of config.models) {
+    let streamError: unknown = null;
+
     try {
       const response = await createMiniMaxStream({
         apiKey: config.apiKey,
@@ -229,11 +294,32 @@ export async function recommendWithMiniMaxStream(rawQuery: string) {
         },
       });
     } catch (error) {
-      if (shouldTryNextModel(error, model, config.models)) {
+      streamError = error;
+    }
+
+    try {
+      const text = await createMiniMaxText({
+        apiKey: config.apiKey,
+        baseURL: config.baseURL,
+        model,
+        prompt,
+      });
+
+      return new Response(text, {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store",
+        },
+      });
+    } catch (error) {
+      if (
+        shouldTryNextModel(error, model, config.models) ||
+        shouldTryNextModel(streamError, model, config.models)
+      ) {
         continue;
       }
 
-      throw error;
+      throw error instanceof Error ? error : streamError;
     }
   }
 

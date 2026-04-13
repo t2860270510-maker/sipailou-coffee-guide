@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { cafes } from "../lib/cafes";
+import { extractMiniMaxText } from "../lib/minimax";
 import { buildCafeContextBlock, buildRecommendationPrompt, MINIMAX_SYSTEM_PROMPT } from "../lib/minimax-prompts";
 import { getGuideGroupMatches, parseRecommendationQuery } from "../lib/recommendation";
 
@@ -56,4 +57,14 @@ run("recommendation prompt asks for a chat-style reply from the provided cafes",
   const prompt = buildRecommendationPrompt("想和朋友坐坐聊天，离学校近一点");
   assert.match(prompt, /流式输出/);
   assert.match(prompt, /\[Available Cafes\]/);
+});
+
+run("non-stream fallback only keeps the assistant text blocks", () => {
+  const text = extractMiniMaxText([
+    { type: "thinking", thinking: "先想一下" },
+    { type: "text", text: "先去凯瑟琳星巴克。" },
+    { type: "text", text: "如果嫌远，再看 Disc Coffee。" },
+  ]);
+
+  assert.equal(text, "先去凯瑟琳星巴克。如果嫌远，再看 Disc Coffee。");
 });
