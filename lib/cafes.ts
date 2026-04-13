@@ -88,7 +88,7 @@ export const cafes: Cafe[] = [
     summary: "如果只想买一杯简单、稳定、性价比不错的意式，Manner 是很稳的连锁答案。",
     recommendedItems: ["小杯美式", "拿铁", "SOE"],
     notes:
-      "自带杯减 5 元非常实用，虽然不算最近，但连锁品质稳定，适合不想踩坑的日常购买。",
+      "自带杯减 5 元非常实用，虽然不算最近，但连锁品质稳定，适合舍想踩坑的日常购买。",
     sourceNote: "《四牌楼咖啡指北》一手观察",
     verifiedAt: "2026-04-03",
     coverImage: "/cafes/manner.svg",
@@ -132,7 +132,7 @@ export const cafes: Cafe[] = [
     mainScene: "chat",
     tags: ["特调精品", "手冲友好", "预算更高"],
     summary: "不是最近的一家，但如果你就是想喝点更好的豆子或特调，它值得专门走过去。",
-    recommendedItems: ["特调", "手冲", "combo"],
+    recommendedItems: ["特调咖啡", "烘焙", "combo"],
     notes:
       "单品豆和特调都更丰富，价格更高，适合预算充足且明确想喝点不一样的人，不适合追求极致效率。",
     sourceNote: "《四牌楼咖啡指北》一手观察",
@@ -191,31 +191,31 @@ export const guideGroups: GuideGroup[] = [
   {
     id: "early",
     label: "早八友好",
-    kicker: "Go Fast",
+    kicker: "赶时间",
     description: "离门近、开门早、带走效率高，适合未来 30 分钟内就要进教室的人。",
   },
   {
     id: "study",
     label: "学习友好",
-    kicker: "Stay Longer",
+    kicker: "能久坐",
     description: "更适合坐下来自习、改稿、充电，空间稳定性比单杯风味更重要。",
   },
   {
     id: "chat",
     label: "聊天友好",
-    kicker: "Meet & Talk",
+    kicker: "适合见面",
     description: "适合和朋友碰面、简单坐坐，氛围和距离感要比绝对安静更重要。",
   },
   {
     id: "specialty",
     label: "特调精品",
-    kicker: "Drink Better",
+    kicker: "想喝好点",
     description: "当需求从提神变成“想喝点不一样”，这组会更有意思。",
   },
   {
     id: "editorial",
     label: "文艺氛围",
-    kicker: "Editorial Mood",
+    kicker: "氛围感",
     description: "更适合被拍下来、被记住，也更适合做你的校园生活方式地图。",
   },
 ];

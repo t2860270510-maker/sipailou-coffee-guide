@@ -12,10 +12,34 @@ import type {
 } from "../lib/types";
 
 const scenarioPrompts = [
-  "明早早八前想顺路买一杯，别太贵",
-  "下午想写论文，最好安静一点，有插座更好",
-  "想和朋友坐坐聊天，离学校近一点",
+  "明早第一节前想顺路带一杯，别太贵",
+  "下午想坐一会写东西，最好安静一点",
+  "想和朋友碰面聊聊天，离学校近一点",
 ];
+
+const followupPrompts = [
+  "预算再压低一点",
+  "换成更适合久坐的",
+  "离东门再近一点",
+];
+
+const pendingStages = [
+  {
+    shortLabel: "抓重点",
+    title: "正在抓你的重点",
+    detail: "先判断你更在意距离、预算，还是能不能坐久一点。",
+  },
+  {
+    shortLabel: "比店铺",
+    title: "正在比对附近店铺",
+    detail: "会一起比较距离、营业时间、安静程度和价格。",
+  },
+  {
+    shortLabel: "整理答案",
+    title: "正在整理更直接的建议",
+    detail: "只留下更适合你的两家，把差别说明白。",
+  },
+] as const;
 
 type ConversationItem = {
   id: string;
@@ -30,7 +54,7 @@ const initialConversation: ConversationItem[] = [
     role: "assistant",
     type: "intro",
     content:
-      "说一句你现在的需求，我会直接给你两家更合适的店，并把各自适合的理由说明白。",
+      "说一句你现在想要什么，我会直接帮你缩到更合适的两家，并把差别说清楚。",
   },
 ];
 
@@ -91,14 +115,43 @@ export function CampusCoffeeApp({
   const [conversation, setConversation] = useState<ConversationItem[]>(initialConversation);
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pendingStageIndex, setPendingStageIndex] = useState(0);
+  const [pendingSeconds, setPendingSeconds] = useState(0);
   const [selectedCafe, setSelectedCafe] = useState<Cafe | null>(null);
   const [activeGuideGroup, setActiveGuideGroup] = useState<GuideGroupId>("early");
+  const [isComposerFocused, setIsComposerFocused] = useState(false);
   const deferredGuideGroup = useDeferredValue(activeGuideGroup);
   const [isPending, startTransition] = useTransition();
-  const chatLogRef = useRef<HTMLDivElement | null>(null);
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
+  const queryInputRef = useRef<HTMLTextAreaElement | null>(null);
   const hasTypedQuery = query.trim().length > 0;
   const showQuickPrompts = !hasTypedQuery && conversation.length <= initialConversation.length;
+  const hasConversationStarted = conversation.length > initialConversation.length;
+  const showFollowupPrompts = !hasTypedQuery && hasConversationStarted && !isSubmitting;
+  const activeStreamingMessage = [...conversation]
+    .reverse()
+    .find((item) => item.role === "assistant" && item.type === "streaming");
+  const hasStreamingResponse = Boolean(activeStreamingMessage?.content.trim());
+  const activePendingStage = pendingStages[pendingStageIndex] ?? pendingStages[pendingStages.length - 1];
+  const headerStatus = isSubmitting
+    ? hasStreamingResponse
+      ? "答案还在继续补充"
+      : activePendingStage.title
+    : isPending
+      ? "正在更新页面"
+      : "随时可问";
+  const waitingCopy = hasStreamingResponse
+    ? `已经开始返回内容，还在继续补全更完整的建议${pendingSeconds >= 6 ? `，已等待 ${pendingSeconds} 秒` : ""}。`
+    : `${activePendingStage.detail}${pendingSeconds >= 6 ? ` 已等待 ${pendingSeconds} 秒。` : ""}`;
+  const helperCopy = isSubmitting
+    ? "页面会持续显示当前状态，不会像掉线一样没有反应。"
+    : "只给你两家更合适的，不会塞一串名单。";
+  const composerTitle = hasConversationStarted ? "继续补一句，我会顺着这次场景往下缩" : "先把你的场景说一句";
+  const composerTip = isSubmitting
+    ? "结果正在继续往下长出来，先不用离开这个输入区。"
+    : isComposerFocused
+      ? "回车发送，换行用 Shift + Enter。"
+      : "越像平时发消息，返回就越直接。";
 
   const activeGroupMeta = guideGroups.find((group) => group.id === deferredGuideGroup) ?? guideGroups[0];
   const visibleCafes = getGuideGroupMatches(deferredGuideGroup);
@@ -106,6 +159,35 @@ export function CampusCoffeeApp({
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: isSubmitting ? "auto" : "smooth", block: "end" });
   }, [conversation, isPending, isSubmitting]);
+
+  useEffect(() => {
+    const textarea = queryInputRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "0px";
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 84), 176)}px`;
+  }, [query]);
+
+  useEffect(() => {
+    if (!isSubmitting) {
+      setPendingStageIndex(0);
+      setPendingSeconds(0);
+      return;
+    }
+
+    const stageTimer = window.setInterval(() => {
+      setPendingStageIndex((current) => Math.min(current + 1, pendingStages.length - 1));
+    }, 1800);
+
+    const elapsedTimer = window.setInterval(() => {
+      setPendingSeconds((current) => current + 1);
+    }, 1000);
+
+    return () => {
+      window.clearInterval(stageTimer);
+      window.clearInterval(elapsedTimer);
+    };
+  }, [isSubmitting]);
 
   useEffect(() => {
     document.body.classList.add("motion-ready");
@@ -243,9 +325,9 @@ export function CampusCoffeeApp({
   return (
     <main className="page-shell">
       <section className="page-masthead" data-reveal style={{ "--reveal-delay": "40ms" } as CSSProperties}>
-        <p className="eyebrow">Sipailou Coffee Companion</p>
-        <h1>今天喝点什么</h1>
-        <p className="masthead-intro">一句当下心境，换两家更值得停留的地方。</p>
+        <p className="eyebrow">四牌楼咖啡地图</p>
+        <h1>今天去哪里喝</h1>
+        <p className="masthead-intro">把眼下的需求说清楚，页面就先帮你排掉不适合的。</p>
       </section>
 
       <section className="hero-section">
@@ -254,24 +336,46 @@ export function CampusCoffeeApp({
           <div className="chat-shell" data-reveal style={{ "--reveal-delay": "120ms" } as CSSProperties}>
             <div className="chat-head">
               <div>
-                <p className="eyebrow">AI Concierge</p>
-                <h2>直接说你的场景</h2>
+                <p className="eyebrow">即时推荐</p>
+                <h2>直接说你现在想要什么</h2>
               </div>
-              <span className="panel-status">
-                {isSubmitting ? "正在回复" : isPending ? "更新中" : "在线"}
-              </span>
+              <div className="chat-status">
+                <span className={`panel-status ${isSubmitting ? "panel-status-busy" : ""}`}>{headerStatus}</span>
+                <p className="status-copy">{isSubmitting ? waitingCopy : "输入一句需求，我会帮你先缩到更值得去的两家。"}</p>
+              </div>
             </div>
 
-            <div ref={chatLogRef} className="chat-log" aria-live="polite">
+            <div className="chat-context-strip" aria-label="聊天提示">
+              <span>像发消息一样提问</span>
+              <span>答案会边生成边显示</span>
+              <span>默认只留两家</span>
+            </div>
+
+            <div className="chat-log" aria-live="polite" aria-busy={isSubmitting}>
               {conversation.map((item) => {
+                const roleLabel = item.role === "user" ? "你" : "向导";
+                const messageContent =
+                  item.type === "streaming" && !item.content
+                    ? `${activePendingStage.title}\n${activePendingStage.detail}`
+                    : item.content;
+
                 return (
                   <article
                     key={item.id}
                     className={`message ${item.role === "user" ? "message-user" : "message-assistant"}`}
                   >
-                    <p className="message-label">{item.role === "user" ? "你" : "Assistant"}</p>
-                    <p className={`message-text ${item.type === "streaming" ? "message-streaming" : ""}`}>
-                      {item.content}
+                    <p className="message-label">
+                      <span>{roleLabel}</span>
+                      {item.type === "streaming" ? (
+                        <span className="message-state">{hasStreamingResponse ? "还在补充" : "正在输入"}</span>
+                      ) : null}
+                    </p>
+                    <p
+                      className={`message-text ${item.type === "streaming" ? "message-streaming" : ""} ${
+                        item.type === "streaming" && !item.content ? "message-pending" : ""
+                      }`}
+                    >
+                      {messageContent}
                     </p>
                   </article>
                 );
@@ -279,14 +383,49 @@ export function CampusCoffeeApp({
               <div ref={scrollAnchorRef} />
             </div>
 
+            {isSubmitting ? (
+              <div className="waiting-banner" role="status" aria-live="polite">
+                <div className="waiting-banner-head">
+                  <span className="waiting-pulse" aria-hidden="true" />
+                  <div>
+                    <p className="waiting-title">{hasStreamingResponse ? "答案正在继续展开" : activePendingStage.title}</p>
+                    <p className="waiting-copy">{waitingCopy}</p>
+                  </div>
+                </div>
+                <div className="waiting-stage-row" aria-hidden="true">
+                  {pendingStages.map((stage, index) => {
+                    const stageState =
+                      index < pendingStageIndex ? "waiting-stage-done" : index === pendingStageIndex ? "waiting-stage-active" : "";
+
+                    return (
+                      <span key={stage.shortLabel} className={`waiting-stage ${stageState}`.trim()}>
+                        {stage.shortLabel}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+
             <div className="composer">
+              <div className="composer-heading">
+                <div>
+                  <p className="composer-title">{composerTitle}</p>
+                  <p className="composer-tip">{composerTip}</p>
+                </div>
+                <span className="composer-badge">{isSubmitting ? "持续返回中" : "聊天输入区"}</span>
+              </div>
+
               <label className="composer-shell" htmlFor="coffee-query">
                 <span className="sr-only">输入需求</span>
                 <textarea
+                  ref={queryInputRef}
                   id="coffee-query"
                   className="query-input"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
+                  onFocus={() => setIsComposerFocused(true)}
+                  onBlur={() => setIsComposerFocused(false)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && !event.shiftKey) {
                       event.preventDefault();
@@ -295,23 +434,26 @@ export function CampusCoffeeApp({
                       }
                     }
                   }}
-                  rows={3}
+                  rows={1}
                   placeholder={hasTypedQuery ? "" : "例如：下午想写论文，预算别太高，最好安静一点。"}
                 />
               </label>
 
-              {showQuickPrompts ? (
-                <div className="quick-prompts" aria-label="快捷场景">
-                  {scenarioPrompts.map((prompt) => (
-                    <button
-                      key={prompt}
-                      className="prompt-chip"
-                      type="button"
-                      onClick={() => void submitPrompt(prompt)}
-                    >
-                      {prompt}
-                    </button>
-                  ))}
+              {showQuickPrompts || showFollowupPrompts ? (
+                <div className="prompt-group">
+                  <p className="prompt-group-label">{showQuickPrompts ? "可以直接点一句" : "也可以继续追问"}</p>
+                  <div className="quick-prompts" aria-label={showQuickPrompts ? "快捷场景" : "继续追问"}>
+                    {(showQuickPrompts ? scenarioPrompts : followupPrompts).map((prompt) => (
+                      <button
+                        key={prompt}
+                        className="prompt-chip"
+                        type="button"
+                        onClick={() => void submitPrompt(prompt)}
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ) : null}
 
@@ -322,9 +464,9 @@ export function CampusCoffeeApp({
                   onClick={() => void submitPrompt()}
                   disabled={isSubmitting}
                 >
-                  {isSubmitting ? "正在回复..." : "发送消息"}
+                  {isSubmitting ? "还在整理中..." : "发送消息"}
                 </button>
-                <p className="helper-copy">不铺陈，不兜圈，只留下更贴近当下的两家。</p>
+                <p className="helper-copy">{helperCopy}</p>
               </div>
 
               {formError ? <p className="form-error">{formError}</p> : null}
@@ -333,21 +475,21 @@ export function CampusCoffeeApp({
 
           <div className="hero-copy" data-reveal style={{ "--reveal-delay": "200ms" } as CSSProperties}>
             <div className="hero-copy-top">
-              <p className="eyebrow">Scene Selection</p>
-              <h2>先说此刻，再决定去哪一间。</h2>
+              <p className="eyebrow">先说需求</p>
+              <h2>把当下想要的说清楚，答案就会短很多。</h2>
               <p className="hero-intro">
-                把赶时间、想独处、要见人，或只是想认真喝一杯的念头说清楚，
-                答案就不必在一攒店名里反复比较。
+                不管你是赶时间、想安静坐一会、要见人，还是只想喝一杯顺手不出错的，
+                先把场景说清楚，就不用在一排店名里来回比较。
               </p>
               <div className="hero-microcopy">
-                <span>先说场景</span>
-                <span>只给两家</span>
-                <span>再看观察</span>
+                <span>先说需求</span>
+                <span>只留两家</span>
+                <span>差别说清</span>
               </div>
             </div>
 
             <article className="hero-note">
-              <p>不是把选择做多，而是把犹豫缩短。</p>
+              <p>不是给你更多店，而是先帮你排掉不适合的。</p>
             </article>
 
             <div className="editorial-inline">
@@ -376,10 +518,10 @@ export function CampusCoffeeApp({
       <section className="guide-section" data-reveal style={{ "--reveal-delay": "60ms" } as CSSProperties}>
         <div className="section-heading guide-heading">
           <div>
-            <p className="eyebrow">Coffee Guide</p>
+            <p className="eyebrow">咖啡地图</p>
             <h2>往下滑，是一份可以慢慢逛的四牌楼咖啡地图</h2>
           </div>
-          <p className="section-note">你也可以不问 AI，直接按场景看整份内容。</p>
+          <p className="section-note">你也可以不走输入框，直接按场景把整份内容翻一遍。</p>
         </div>
 
         <div className="guide-layout">
@@ -453,7 +595,7 @@ export function CampusCoffeeApp({
 
                   <div className="card-actions">
                     <button className="text-button" type="button" onClick={() => setSelectedCafe(cafe)}>
-                      打开店铺观察
+                      看这家更细一点
                     </button>
                     {cafe.id === "katherine-starbucks" ? (
                       <span className="meta-inline">{formatSocket(cafe.socketLevel)}</span>
@@ -471,7 +613,7 @@ export function CampusCoffeeApp({
           <button className="drawer-backdrop" type="button" onClick={() => setSelectedCafe(null)} aria-label="关闭详情" />
           <div className="drawer-panel">
             <button className="drawer-mobile-close" type="button" onClick={() => setSelectedCafe(null)}>
-              返回
+              收起
             </button>
             <div className="drawer-media">
               <Image
@@ -489,7 +631,7 @@ export function CampusCoffeeApp({
                   <h2 id="detail-title">{selectedCafe.name}</h2>
                 </div>
                 <button className="close-button" type="button" onClick={() => setSelectedCafe(null)}>
-                  关闭观察
+                  收起
                 </button>
               </div>
 
@@ -536,12 +678,12 @@ export function CampusCoffeeApp({
               </div>
 
               <div className="drawer-section">
-                <p className="eyebrow">编辑观察</p>
+                <p className="eyebrow">补充观察</p>
                 <p>{selectedCafe.notes}</p>
               </div>
 
               <p className="source-note">
-                信息来源：{selectedCafe.sourceNote}，最近整理时间 {selectedCafe.verifiedAt}
+                整理来源：{selectedCafe.sourceNote}，最近整理时间 {selectedCafe.verifiedAt}
               </p>
             </div>
           </div>

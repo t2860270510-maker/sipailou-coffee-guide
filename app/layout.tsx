@@ -18,7 +18,7 @@ const accent = Manrope({
 
 export const metadata: Metadata = {
   title: "四牌楼咖啡指北",
-  description: "输入一句需求，让 AI 帮你在四牌楼校区周边快速选出更适合的咖啡店。",
+  description: "输入一句需求，快速缩到四牌楼校区周边更退合你的两家咖啡店。",
 };
 
 export default function RootLayout({

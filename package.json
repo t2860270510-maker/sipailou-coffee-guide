@@ -9,7 +9,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --experimental-strip-types ./tests/recommendation.test.ts"
+    "test": "tsx ./tests/recommendation.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
