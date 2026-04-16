@@ -2,8 +2,11 @@
 .next
 node_modules
 .env.local
+.dev.vars
 coverage
 dist
 out
 .vercel
 .netlify
+.open-next
+.wrangler
