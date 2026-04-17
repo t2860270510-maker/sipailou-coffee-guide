@@ -58,6 +58,16 @@ const initialConversation: ConversationItem[] = [
   },
 ];
 
+const desktopTextareaBounds = {
+  min: 68,
+  max: 152,
+};
+
+const mobileTextareaBounds = {
+  min: 54,
+  max: 128,
+};
+
 function formatPrice(priceLevel: Cafe["priceLevel"]) {
   if (priceLevel === "low") return "预算友好";
   if (priceLevel === "medium") return "价格中位";
@@ -144,14 +154,14 @@ export function CampusCoffeeApp({
     ? `已经开始返回内容，还在继续补全更完整的建议${pendingSeconds >= 6 ? `，已等待 ${pendingSeconds} 秒` : ""}。`
     : `${activePendingStage.detail}${pendingSeconds >= 6 ? ` 已等待 ${pendingSeconds} 秒。` : ""}`;
   const helperCopy = isSubmitting
-    ? "页面会持续显示当前状态，不会像掉线一样没有反应。"
-    : "只给你两家更合适的，不会塞一串名单。";
-  const composerTitle = hasConversationStarted ? "继续补一句，我会顺着这次场景往下缩" : "先把你的场景说一句";
+    ? "状态会持续更新，不会突然停住。"
+    : "只留更合适的两家，不塞一长串店名。";
+  const composerTitle = hasConversationStarted ? "继续补一句" : "说一句场景";
   const composerTip = isSubmitting
-    ? "结果正在继续往下长出来，先不用离开这个输入区。"
+    ? "结果还在继续返回。"
     : isComposerFocused
       ? "回车发送，换行用 Shift + Enter。"
-      : "越像平时发消息，返回就越直接。";
+      : "像平时发消息一样输入就行。";
 
   const activeGroupMeta = guideGroups.find((group) => group.id === deferredGuideGroup) ?? guideGroups[0];
   const visibleCafes = getGuideGroupMatches(deferredGuideGroup);
@@ -164,8 +174,11 @@ export function CampusCoffeeApp({
     const textarea = queryInputRef.current;
     if (!textarea) return;
 
+    const isCompactViewport = window.matchMedia("(max-width: 760px)").matches;
+    const bounds = isCompactViewport ? mobileTextareaBounds : desktopTextareaBounds;
+
     textarea.style.height = "0px";
-    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 84), 176)}px`;
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, bounds.min), bounds.max)}px`;
   }, [query]);
 
   useEffect(() => {
@@ -326,8 +339,7 @@ export function CampusCoffeeApp({
     <main className="page-shell">
       <section className="page-masthead" data-reveal style={{ "--reveal-delay": "40ms" } as CSSProperties}>
         <p className="eyebrow">四牌楼咖啡地图</p>
-        <h1>今天去哪里喝</h1>
-        <p className="masthead-intro">把眼下的需求说清楚，页面就先帮你排掉不适合的。</p>
+        <h1 className="masthead-title">今天去哪里喝</h1>
       </section>
 
       <section className="hero-section">
@@ -341,7 +353,7 @@ export function CampusCoffeeApp({
               </div>
               <div className="chat-status">
                 <span className={`panel-status ${isSubmitting ? "panel-status-busy" : ""}`}>{headerStatus}</span>
-                <p className="status-copy">{isSubmitting ? waitingCopy : "输入一句需求，我会帮你先缩到更值得去的两家。"}</p>
+                <p className="status-copy">{isSubmitting ? waitingCopy : "输入一句需求，我会先帮你缩到两家。"}</p>
               </div>
             </div>
 
@@ -413,7 +425,7 @@ export function CampusCoffeeApp({
                   <p className="composer-title">{composerTitle}</p>
                   <p className="composer-tip">{composerTip}</p>
                 </div>
-                <span className="composer-badge">{isSubmitting ? "持续返回中" : "聊天输入区"}</span>
+                <span className="composer-badge">{isSubmitting ? "返回中" : "输入区"}</span>
               </div>
 
               <label className="composer-shell" htmlFor="coffee-query">
