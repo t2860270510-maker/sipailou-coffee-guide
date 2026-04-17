@@ -64,8 +64,8 @@ const desktopTextareaBounds = {
 };
 
 const mobileTextareaBounds = {
-  min: 54,
-  max: 128,
+  min: 48,
+  max: 112,
 };
 
 function formatPrice(priceLevel: Cafe["priceLevel"]) {
@@ -130,6 +130,7 @@ export function CampusCoffeeApp({
   const [selectedCafe, setSelectedCafe] = useState<Cafe | null>(null);
   const [activeGuideGroup, setActiveGuideGroup] = useState<GuideGroupId>("early");
   const [isComposerFocused, setIsComposerFocused] = useState(false);
+  const [isPromptTrayOpen, setIsPromptTrayOpen] = useState(false);
   const deferredGuideGroup = useDeferredValue(activeGuideGroup);
   const [isPending, startTransition] = useTransition();
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -143,6 +144,8 @@ export function CampusCoffeeApp({
     .find((item) => item.role === "assistant" && item.type === "streaming");
   const hasStreamingResponse = Boolean(activeStreamingMessage?.content.trim());
   const activePendingStage = pendingStages[pendingStageIndex] ?? pendingStages[pendingStages.length - 1];
+  const activePromptList = showQuickPrompts ? scenarioPrompts : showFollowupPrompts ? followupPrompts : [];
+  const hasPromptSuggestions = activePromptList.length > 0;
   const headerStatus = isSubmitting
     ? hasStreamingResponse
       ? "答案还在继续补充"
@@ -180,6 +183,12 @@ export function CampusCoffeeApp({
     textarea.style.height = "0px";
     textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, bounds.min), bounds.max)}px`;
   }, [query]);
+
+  useEffect(() => {
+    if (hasTypedQuery || !hasPromptSuggestions) {
+      setIsPromptTrayOpen(false);
+    }
+  }, [hasPromptSuggestions, hasTypedQuery]);
 
   useEffect(() => {
     if (!isSubmitting) {
@@ -257,6 +266,7 @@ export function CampusCoffeeApp({
       return;
     }
 
+    setIsPromptTrayOpen(false);
     setFormError(null);
     setIsSubmitting(true);
 
@@ -358,8 +368,8 @@ export function CampusCoffeeApp({
             </div>
 
             <div className="chat-context-strip" aria-label="聊天提示">
-              <span>像发消息一样提问</span>
-              <span>答案会边生成边显示</span>
+              <span>像发消息一样问</span>
+              <span>边生成边显示</span>
               <span>默认只留两家</span>
             </div>
 
@@ -428,34 +438,29 @@ export function CampusCoffeeApp({
                 <span className="composer-badge">{isSubmitting ? "返回中" : "输入区"}</span>
               </div>
 
-              <label className="composer-shell" htmlFor="coffee-query">
-                <span className="sr-only">输入需求</span>
-                <textarea
-                  ref={queryInputRef}
-                  id="coffee-query"
-                  className="query-input"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  onFocus={() => setIsComposerFocused(true)}
-                  onBlur={() => setIsComposerFocused(false)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault();
-                      if (!isSubmitting) {
-                        void submitPrompt();
-                      }
-                    }
-                  }}
-                  rows={1}
-                  placeholder={hasTypedQuery ? "" : "例如：下午想写论文，预算别太高，最好安静一点。"}
-                />
-              </label>
+              {hasPromptSuggestions ? (
+                <div className="prompt-toggle-row">
+                  <button
+                    className={`prompt-toggle ${isPromptTrayOpen ? "prompt-toggle-open" : ""}`}
+                    type="button"
+                    onClick={() => setIsPromptTrayOpen((current) => !current)}
+                    aria-expanded={isPromptTrayOpen}
+                    aria-controls="mobile-prompt-tray"
+                  >
+                    <span>{showQuickPrompts ? "快捷提问" : "继续追问"}</span>
+                    <span className="prompt-toggle-count">{activePromptList.length}</span>
+                  </button>
+                </div>
+              ) : null}
 
-              {showQuickPrompts || showFollowupPrompts ? (
-                <div className="prompt-group">
+              {hasPromptSuggestions ? (
+                <div
+                  id="mobile-prompt-tray"
+                  className={`prompt-group ${isPromptTrayOpen ? "prompt-group-open" : ""}`}
+                >
                   <p className="prompt-group-label">{showQuickPrompts ? "可以直接点一句" : "也可以继续追问"}</p>
                   <div className="quick-prompts" aria-label={showQuickPrompts ? "快捷场景" : "继续追问"}>
-                    {(showQuickPrompts ? scenarioPrompts : followupPrompts).map((prompt) => (
+                    {activePromptList.map((prompt) => (
                       <button
                         key={prompt}
                         className="prompt-chip"
@@ -469,17 +474,46 @@ export function CampusCoffeeApp({
                 </div>
               ) : null}
 
-              <div className="composer-actions">
+              <div className="composer-row">
+                <label className="composer-shell" htmlFor="coffee-query">
+                  <span className="sr-only">输入需求</span>
+                  <textarea
+                    ref={queryInputRef}
+                    id="coffee-query"
+                    className="query-input"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    onFocus={() => setIsComposerFocused(true)}
+                    onBlur={() => setIsComposerFocused(false)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        if (!isSubmitting) {
+                          void submitPrompt();
+                        }
+                      }
+                    }}
+                    rows={1}
+                    placeholder={hasTypedQuery ? "" : "例如：下午想写论文，预算别太高，最好安静一点。"}
+                  />
+                </label>
                 <button
-                  className="primary-button"
+                  className="composer-send"
                   type="button"
                   onClick={() => void submitPrompt()}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !query.trim()}
+                  aria-label={isSubmitting ? "正在生成回答" : "发送消息"}
                 >
-                  {isSubmitting ? "还在整理中..." : "发送消息"}
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path
+                      d="M4.75 11.25h9.69L10.6 7.41a.75.75 0 1 1 1.06-1.06l5.12 5.12a.75.75 0 0 1 0 1.06l-5.12 5.12a.75.75 0 0 1-1.06-1.06l3.84-3.84H4.75a.75.75 0 0 1 0-1.5Z"
+                      fill="currentColor"
+                    />
+                  </svg>
                 </button>
-                <p className="helper-copy">{helperCopy}</p>
               </div>
+
+              <p className="helper-copy">{helperCopy}</p>
 
               {formError ? <p className="form-error">{formError}</p> : null}
             </div>
