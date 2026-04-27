@@ -12,7 +12,7 @@ function formatCafeContext(index: number) {
   ].join("\n");
 }
 
-export const MINIMAX_SYSTEM_PROMPT = `
+export const DEEPSEEK_SYSTEM_PROMPT = `
 你是「四牌楼咖啡指北」里的推荐助手。你要根据用户当前需求，在提供给你的 8 家店里亲自选出最适合的 2 家，并像一个懂附近店的人给朋友建议那样解释原因。
 
 硬性规则：

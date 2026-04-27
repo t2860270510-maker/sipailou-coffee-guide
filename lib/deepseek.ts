@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
 
-import { buildRecommendationPrompt, MINIMAX_SYSTEM_PROMPT } from "./minimax-prompts";
+import { buildRecommendationPrompt, DEEPSEEK_SYSTEM_PROMPT } from "./deepseek-prompts";
 
-type MiniMaxSuccessResponse = {
+const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com/anthropic";
+const DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash";
+
+type DeepSeekSuccessResponse = {
   model?: string;
   content?: Array<{
     type?: string;
@@ -17,49 +20,46 @@ type MiniMaxSuccessResponse = {
   };
 };
 
-function getMiniMaxConfig() {
-  const apiKey = process.env.MINIMAX_API_KEY ?? process.env.ANTHROPIC_API_KEY;
-  const apiKeySource = process.env.MINIMAX_API_KEY
-    ? "MINIMAX_API_KEY"
-    : process.env.ANTHROPIC_API_KEY
-      ? "ANTHROPIC_API_KEY"
-      : null;
-  const baseURL =
-    process.env.MINIMAX_BASE_URL ??
-    process.env.ANTHROPIC_BASE_URL ??
-    "https://api.minimaxi.com/anthropic";
-  const baseURLSource = process.env.MINIMAX_BASE_URL
-    ? "MINIMAX_BASE_URL"
-    : process.env.ANTHROPIC_BASE_URL
-      ? "ANTHROPIC_BASE_URL"
-      : "default";
-  const primaryModel = process.env.MINIMAX_MODEL ?? process.env.ANTHROPIC_MODEL ?? "MiniMax-M2.7";
-  const primaryModelSource = process.env.MINIMAX_MODEL
-    ? "MINIMAX_MODEL"
-    : process.env.ANTHROPIC_MODEL
-      ? "ANTHROPIC_MODEL"
-      : "default";
-  const fallbackModels = (process.env.MINIMAX_FALLBACK_MODELS ?? "MiniMax-M2.5")
+function getFirstEnv(candidates: string[]) {
+  for (const name of candidates) {
+    const value = process.env[name];
+    if (value) {
+      return { value, source: name };
+    }
+  }
+
+  return { value: null, source: null };
+}
+
+function splitModelList(value: string | null) {
+  return (value ?? "")
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
 
-  if (!apiKey) {
+function getDeepSeekConfig() {
+  const apiKey = getFirstEnv(["DEEPSEEK_API_KEY", "MINIMAX_API_KEY", "ANTHROPIC_API_KEY"]);
+  const baseURL = getFirstEnv(["DEEPSEEK_BASE_URL", "MINIMAX_BASE_URL", "ANTHROPIC_BASE_URL"]);
+  const primaryModel = getFirstEnv(["DEEPSEEK_MODEL", "MINIMAX_MODEL", "ANTHROPIC_MODEL"]);
+  const fallbackModels = getFirstEnv(["DEEPSEEK_FALLBACK_MODELS", "MINIMAX_FALLBACK_MODELS"]);
+
+  if (!apiKey.value) {
     return null;
   }
 
   return {
-    apiKey,
-    apiKeySource,
-    baseURL,
-    baseURLSource,
-    primaryModelSource,
-    models: Array.from(new Set([primaryModel, ...fallbackModels])),
+    apiKey: apiKey.value,
+    apiKeySource: apiKey.source,
+    baseURL: baseURL.value ?? DEFAULT_DEEPSEEK_BASE_URL,
+    baseURLSource: baseURL.source ?? "default",
+    primaryModelSource: primaryModel.source ?? "default",
+    models: Array.from(new Set([primaryModel.value ?? DEFAULT_DEEPSEEK_MODEL, ...splitModelList(fallbackModels.value)])),
   };
 }
 
-export function getMiniMaxRuntimeSnapshot() {
-  const config = getMiniMaxConfig();
+export function getDeepSeekRuntimeSnapshot() {
+  const config = getDeepSeekConfig();
 
   return {
     apiKeyPresent: Boolean(config?.apiKey),
@@ -67,17 +67,17 @@ export function getMiniMaxRuntimeSnapshot() {
     apiKeyFingerprint: config?.apiKey
       ? createHash("sha256").update(config.apiKey).digest("hex").slice(0, 12)
       : null,
-    baseURL: config?.baseURL ?? "https://api.minimaxi.com/anthropic",
+    baseURL: config?.baseURL ?? DEFAULT_DEEPSEEK_BASE_URL,
     baseURLSource: config?.baseURLSource ?? "default",
-    primaryModel: config?.models[0] ?? "MiniMax-M2.7",
+    primaryModel: config?.models[0] ?? DEFAULT_DEEPSEEK_MODEL,
     primaryModelSource: config?.primaryModelSource ?? "default",
-    fallbackModels: config ? config.models.slice(1) : ["MiniMax-M2.5"],
+    fallbackModels: config ? config.models.slice(1) : [],
     nodeEnv: process.env.NODE_ENV ?? null,
   };
 }
 
-function buildMiniMaxError(error: MiniMaxSuccessResponse["error"], model: string) {
-  const message = error?.message ?? "MiniMax 请求失败。";
+function buildDeepSeekError(error: DeepSeekSuccessResponse["error"], model: string) {
+  const message = error?.message ?? "DeepSeek 请求失败。";
   const requestId = error?.request_id ? ` request_id=${error.request_id}` : "";
 
   if (error?.code === "unknown_model" || /unable to find suitable provider/i.test(message)) {
@@ -85,7 +85,7 @@ function buildMiniMaxError(error: MiniMaxSuccessResponse["error"], model: string
   }
 
   if (error?.type === "api_error" && /system error/i.test(message)) {
-    return new Error(`MiniMax 服务临时异常：${message}${requestId}`);
+    return new Error(`DeepSeek 服务临时异常：${message}${requestId}`);
   }
 
   return new Error(`${message}${requestId}`);
@@ -100,7 +100,7 @@ function shouldTryNextModel(error: unknown, currentModel: string, allModels: str
   return hasNextModel && /不可用|unknown_model|unable to find suitable provider/i.test(error.message);
 }
 
-async function createMiniMaxStream({
+async function createDeepSeekStream({
   apiKey,
   baseURL,
   model,
@@ -120,7 +120,7 @@ async function createMiniMaxStream({
     },
     body: JSON.stringify({
       model,
-      system: MINIMAX_SYSTEM_PROMPT,
+      system: DEEPSEEK_SYSTEM_PROMPT,
       max_tokens: 900,
       temperature: 0.3,
       stream: true,
@@ -137,8 +137,8 @@ async function createMiniMaxStream({
     return response;
   }
 
-  const payload = (await response.json().catch(() => ({}))) as MiniMaxSuccessResponse;
-  throw buildMiniMaxError(payload.error, model);
+  const payload = (await response.json().catch(() => ({}))) as DeepSeekSuccessResponse;
+  throw buildDeepSeekError(payload.error, model);
 }
 
 function extractTextDelta(payload: Record<string, unknown>) {
@@ -151,7 +151,7 @@ function extractTextDelta(payload: Record<string, unknown>) {
   return typeof text === "string" ? text : "";
 }
 
-export function extractMiniMaxText(content: MiniMaxSuccessResponse["content"] | null | undefined) {
+export function extractDeepSeekText(content: DeepSeekSuccessResponse["content"] | null | undefined) {
   if (!content?.length) {
     return "";
   }
@@ -162,7 +162,7 @@ export function extractMiniMaxText(content: MiniMaxSuccessResponse["content"] | 
     .trim();
 }
 
-async function createMiniMaxText({
+async function createDeepSeekText({
   apiKey,
   baseURL,
   model,
@@ -182,7 +182,7 @@ async function createMiniMaxText({
     },
     body: JSON.stringify({
       model,
-      system: MINIMAX_SYSTEM_PROMPT,
+      system: DEEPSEEK_SYSTEM_PROMPT,
       max_tokens: 900,
       temperature: 0.3,
       stream: false,
@@ -195,13 +195,13 @@ async function createMiniMaxText({
     }),
   });
 
-  const payload = (await response.json().catch(() => ({}))) as MiniMaxSuccessResponse;
+  const payload = (await response.json().catch(() => ({}))) as DeepSeekSuccessResponse;
 
   if (!response.ok) {
-    throw buildMiniMaxError(payload.error, model);
+    throw buildDeepSeekError(payload.error, model);
   }
 
-  const text = extractMiniMaxText(payload.content);
+  const text = extractDeepSeekText(payload.content);
   if (text) {
     return text;
   }
@@ -268,8 +268,8 @@ function sseToTextStream(stream: ReadableStream<Uint8Array>) {
   });
 }
 
-export async function recommendWithMiniMaxStream(rawQuery: string) {
-  const config = getMiniMaxConfig();
+export async function recommendWithDeepSeekStream(rawQuery: string) {
+  const config = getDeepSeekConfig();
   if (!config) {
     throw new Error("当前没有可用的模型配置。");
   }
@@ -280,7 +280,7 @@ export async function recommendWithMiniMaxStream(rawQuery: string) {
     let streamError: unknown = null;
 
     try {
-      const response = await createMiniMaxStream({
+      const response = await createDeepSeekStream({
         apiKey: config.apiKey,
         baseURL: config.baseURL,
         model,
@@ -298,7 +298,7 @@ export async function recommendWithMiniMaxStream(rawQuery: string) {
     }
 
     try {
-      const text = await createMiniMaxText({
+      const text = await createDeepSeekText({
         apiKey: config.apiKey,
         baseURL: config.baseURL,
         model,

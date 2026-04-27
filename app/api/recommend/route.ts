@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { getMiniMaxRuntimeSnapshot, recommendWithMiniMaxStream } from "../../../lib/minimax";
+import { getDeepSeekRuntimeSnapshot, recommendWithDeepSeekStream } from "../../../lib/deepseek";
 
 const requestSchema = z.object({
   query: z.string().trim().min(2, "请输入更完整一点的需求。"),
@@ -22,7 +22,7 @@ function toApiErrorMessage(error: unknown) {
 export async function POST(request: Request) {
   try {
     const payload = requestSchema.parse(await request.json());
-    return await recommendWithMiniMaxStream(payload.query);
+    return await recommendWithDeepSeekStream(payload.query);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
@@ -33,13 +33,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const shouldExposeDebug = process.env.NODE_ENV !== "production" || process.env.MINIMAX_DEBUG === "1";
+    const shouldExposeDebug =
+      process.env.NODE_ENV !== "production" || process.env.DEEPSEEK_DEBUG === "1" || process.env.MINIMAX_DEBUG === "1";
 
     return NextResponse.json(
       shouldExposeDebug
         ? {
             message: toApiErrorMessage(error),
-            debug: getMiniMaxRuntimeSnapshot(),
+            debug: getDeepSeekRuntimeSnapshot(),
           }
         : {
             message: toApiErrorMessage(error),
