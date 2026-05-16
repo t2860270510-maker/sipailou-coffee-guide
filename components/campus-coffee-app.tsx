@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useDeferredValue, useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 
+import { CafeMap } from "./cafe-map";
 import {
   formatStaticWalk,
   formatWalkingDistance,
@@ -59,6 +60,25 @@ type DistanceResponse = {
   distances?: WalkingDistanceMap;
   message?: string;
 };
+
+type ActiveView = "chat" | "shops";
+
+const viewTabs: Array<{
+  id: ActiveView;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: "chat",
+    label: "对话推荐",
+    description: "先说需求，只留两家",
+  },
+  {
+    id: "shops",
+    label: "店铺展示",
+    description: "看全部店铺和距离",
+  },
+];
 
 const initialConversation: ConversationItem[] = [
   {
@@ -164,10 +184,11 @@ export function CampusCoffeeApp({
   const [pendingStageIndex, setPendingStageIndex] = useState(0);
   const [pendingSeconds, setPendingSeconds] = useState(0);
   const [selectedCafe, setSelectedCafe] = useState<Cafe | null>(null);
+  const [activeView, setActiveView] = useState<ActiveView>("chat");
   const [distanceStatus, setDistanceStatus] = useState<DistanceStatus>("idle");
-  const [distanceMessage, setDistanceMessage] = useState("可开启定位，查看从你当前位置出发的步行时间。");
+  const [distanceMessage, setDistanceMessage] = useState("访问后会请求定位，用来计算你到每家店的步行时间。");
   const [walkingDistances, setWalkingDistances] = useState<WalkingDistanceMap>({});
-  const [activeGuideGroup, setActiveGuideGroup] = useState<GuideGroupId>("early");
+  const [activeGuideGroup, setActiveGuideGroup] = useState<GuideGroupId>("all");
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [isPromptTrayOpen, setIsPromptTrayOpen] = useState(false);
   const [cardMeta, setCardMeta] = useState<Record<string, { id: string; fitReason: string }[]>>({});
@@ -175,6 +196,7 @@ export function CampusCoffeeApp({
   const [isPending, startTransition] = useTransition();
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
   const queryInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const hasRequestedInitialLocationRef = useRef(false);
   const hasTypedQuery = query.trim().length > 0;
   const showQuickPrompts = !hasTypedQuery && conversation.length <= initialConversation.length;
   const hasConversationStarted = conversation.length > initialConversation.length;
@@ -209,6 +231,11 @@ export function CampusCoffeeApp({
 
   const activeGroupMeta = guideGroups.find((group) => group.id === deferredGuideGroup) ?? guideGroups[0];
   const visibleCafes = getGuideGroupMatches(deferredGuideGroup);
+
+  function formatCafeWalk(cafe: Cafe) {
+    const liveDistance = walkingDistances[cafe.id];
+    return liveDistance ? formatWalkingDistance(liveDistance) : formatStaticWalk(cafe);
+  }
 
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: isSubmitting ? "auto" : "smooth", block: "end" });
@@ -276,10 +303,20 @@ export function CampusCoffeeApp({
       },
     );
 
-    elements.forEach((element) => observer.observe(element));
+    elements.forEach((element) => {
+      const rect = element.getBoundingClientRect();
+      const isInViewport = rect.top < window.innerHeight && rect.bottom > 0;
+
+      if (isInViewport) {
+        element.classList.add("is-visible");
+        return;
+      }
+
+      observer.observe(element);
+    });
 
     return () => observer.disconnect();
-  }, [deferredGuideGroup]);
+  }, [activeView, deferredGuideGroup]);
 
   useEffect(() => {
     if (!selectedCafe) return;
@@ -299,6 +336,13 @@ export function CampusCoffeeApp({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [selectedCafe]);
+
+  useEffect(() => {
+    if (hasRequestedInitialLocationRef.current) return;
+    hasRequestedInitialLocationRef.current = true;
+
+    requestWalkingDistances();
+  }, []);
 
   async function submitPrompt(nextQuery?: string) {
     const payload = (nextQuery ?? query).trim();
@@ -421,6 +465,15 @@ export function CampusCoffeeApp({
     }
   }
 
+  function handleViewChange(nextView: ActiveView) {
+    if (nextView === activeView) return;
+
+    setActiveView(nextView);
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, behavior: "auto" });
+    });
+  }
+
   async function fetchWalkingDistances(position: GeolocationPosition) {
     setDistanceStatus("loading");
     setDistanceMessage("正在计算从你当前位置出发的步行时间。");
@@ -454,6 +507,8 @@ export function CampusCoffeeApp({
   }
 
   function requestWalkingDistances() {
+    if (isDistanceLoading) return;
+
     if (!("geolocation" in navigator)) {
       setDistanceStatus("error");
       setDistanceMessage("当前浏览器不支持定位，先显示校门步行距离。");
@@ -480,13 +535,39 @@ export function CampusCoffeeApp({
   }
 
   return (
-    <main className="page-shell">
+    <main className={`page-shell page-shell-${activeView}`}>
+      <nav className="view-switcher" aria-label="页面切换">
+        <div className="view-switcher-inner" role="tablist" aria-label="四牌楼咖啡页面">
+          {viewTabs.map((tab) => (
+            <button
+              key={tab.id}
+              id={`${tab.id}-view-tab`}
+              className={`view-switcher-button ${activeView === tab.id ? "view-switcher-button-active" : ""}`}
+              type="button"
+              role="tab"
+              aria-selected={activeView === tab.id}
+              aria-controls={`${tab.id}-view`}
+              onClick={() => handleViewChange(tab.id)}
+            >
+              <span>{tab.label}</span>
+              <span className="sr-only">{tab.description}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
+
       <section className="page-masthead" data-reveal style={{ "--reveal-delay": "40ms" } as CSSProperties}>
         <p className="eyebrow">四牌楼咖啡地图</p>
         <h1 className="masthead-title">今天去哪里喝</h1>
       </section>
 
-      <section className="hero-section">
+      {activeView === "chat" ? (
+      <section
+        id="chat-view"
+        className="hero-section"
+        role="tabpanel"
+        aria-labelledby="chat-view-tab"
+      >
         <div className="hero-backdrop" />
         <div className="hero-grid">
           <div className="chat-shell" data-reveal style={{ "--reveal-delay": "120ms" } as CSSProperties}>
@@ -557,7 +638,9 @@ export function CampusCoffeeApp({
                                 <p className="inline-card-name">{cafe.name}</p>
                                 <p className="inline-card-reason">{card.fitReason}</p>
                                 <div className="inline-card-meta">
-                                  <span>{formatStaticWalk(cafe)}</span>
+                                  <span className={walkingDistances[cafe.id] ? "inline-distance-current" : ""}>
+                                    {formatCafeWalk(cafe)}
+                                  </span>
                                   <span>{formatPrice(cafe.priceLevel)}</span>
                                 </div>
                               </div>
@@ -727,28 +810,41 @@ export function CampusCoffeeApp({
           </div>
         </div>
       </section>
+      ) : null}
 
-      <section className="guide-section" data-reveal style={{ "--reveal-delay": "60ms" } as CSSProperties}>
-        <div className="section-heading guide-heading">
-          <div>
-            <p className="eyebrow">咖啡地图</p>
-            <h2>往下滑，是一份可以慢慢逛的四牌楼咖啡地图</h2>
+      {activeView === "shops" ? (
+      <section
+        id="shops-view"
+        className="guide-section"
+        data-reveal
+        style={{ "--reveal-delay": "60ms" } as CSSProperties}
+        role="tabpanel"
+        aria-labelledby="shops-view-tab"
+      >
+        <div className="shop-map-top" data-reveal style={{ "--reveal-delay": "40ms" } as CSSProperties}>
+          <div className="shop-map-heading">
+            <div>
+              <p className="eyebrow">咖啡地图</p>
+              <h2>店铺点位</h2>
+            </div>
+            <span className="shop-map-count">{cafes.length} 家</span>
           </div>
           <div className="guide-actions">
-            <p className="section-note">你也可以不走输入框，直接按场景把整份内容翻一遍。</p>
             <button
               className={`location-button ${isDistanceLoading ? "location-button-loading" : ""}`}
               type="button"
               onClick={requestWalkingDistances}
               disabled={isDistanceLoading}
             >
-              {isDistanceLoading ? "正在更新距离" : distanceStatus === "ready" ? "重新定位" : "使用当前位置"}
+              {isDistanceLoading ? "正在更新距离" : distanceStatus === "ready" ? "重新定位" : distanceStatus === "error" ? "再次尝试" : "使用当前位置"}
             </button>
             <p className={`location-status location-status-${distanceStatus}`} role="status" aria-live="polite">
               {distanceMessage}
             </p>
           </div>
         </div>
+
+        <CafeMap cafes={cafes} walkingDistances={walkingDistances} onSelectCafe={setSelectedCafe} />
 
         <div className="guide-layout">
           <aside className="guide-sidebar">
@@ -786,6 +882,7 @@ export function CampusCoffeeApp({
                     src={cafe.coverImage}
                     alt={`${cafe.name} cover`}
                     fill
+                    priority={index === 0}
                     sizes="(max-width: 800px) 100vw, 45vw"
                     className="cafe-image"
                   />
@@ -804,10 +901,7 @@ export function CampusCoffeeApp({
 
                   <div className="meta-grid">
                     <span>{cafe.nearestGate}</span>
-                    <span>{formatStaticWalk(cafe)}</span>
-                    {walkingDistances[cafe.id] ? (
-                      <span className="distance-pill">{formatWalkingDistance(walkingDistances[cafe.id])}</span>
-                    ) : null}
+                    <span className={walkingDistances[cafe.id] ? "distance-pill" : ""}>{formatCafeWalk(cafe)}</span>
                     <span>{cafe.weekdayHours}</span>
                     <span>{formatPrice(cafe.priceLevel)}</span>
                   </div>
@@ -836,6 +930,7 @@ export function CampusCoffeeApp({
           </div>
         </div>
       </section>
+      ) : null}
 
       {selectedCafe ? (
         <div className="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="detail-title">
@@ -871,16 +966,16 @@ export function CampusCoffeeApp({
                   <dt>最近校门</dt>
                   <dd>{selectedCafe.nearestGate}</dd>
                 </div>
-                <div>
-                  <dt>校门步行</dt>
-                  <dd>{formatStaticWalk(selectedCafe)}</dd>
-                </div>
                 {walkingDistances[selectedCafe.id] ? (
                   <div>
                     <dt>当前位置</dt>
                     <dd>{formatWalkingDistance(walkingDistances[selectedCafe.id])}</dd>
                   </div>
                 ) : null}
+                <div>
+                  <dt>校门步行</dt>
+                  <dd>{formatStaticWalk(selectedCafe)}</dd>
+                </div>
                 <div>
                   <dt>工作日营业</dt>
                   <dd>{selectedCafe.weekdayHours}</dd>

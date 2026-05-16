@@ -3,6 +3,7 @@ import type {
   BudgetPref,
   Cafe,
   DistancePref,
+  GuideGroupId,
   MainScene,
   ParsedRequest,
   PriceLevel,
@@ -411,8 +412,10 @@ export function buildLocalRecommendation(rawQuery: string): RecommendationResult
   };
 }
 
-export function getGuideGroupMatches(groupId: string) {
+export function getGuideGroupMatches(groupId: GuideGroupId) {
   switch (groupId) {
+    case "all":
+      return cafes;
     case "early":
       return cafes.filter((cafe) => cafe.earlyFriendly !== "no");
     case "study":

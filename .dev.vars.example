@@ -4,3 +4,5 @@ MINIMAX_MODEL=MiniMax-M2.7
 MINIMAX_FALLBACK_MODELS=MiniMax-M2.5
 MINIMAX_API_KEY=replace-with-your-own-key
 AMAP_WEB_KEY=replace-with-your-own-amap-web-service-key
+NEXT_PUBLIC_AMAP_JS_KEY=replace-with-your-own-amap-js-api-key
+NEXT_PUBLIC_AMAP_SECURITY_JS_CODE=replace-with-your-own-amap-security-js-code

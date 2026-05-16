@@ -296,6 +296,12 @@ export const cafes: Cafe[] = [
 
 export const guideGroups: GuideGroup[] = [
   {
+    id: "all",
+    label: "全部店铺",
+    kicker: "完整列表",
+    description: "按原始观察顺序展示所有店铺，适合先把选择摊开再慢慢筛。",
+  },
+  {
     id: "early",
     label: "早八友好",
     kicker: "赶时间",

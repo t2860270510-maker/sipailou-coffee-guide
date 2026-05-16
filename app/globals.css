@@ -17,7 +17,7 @@
   --radius-lg: 24px;
   --radius-md: 18px;
   --radius-pill: 999px;
-  --chat-shell-offset: 64px;
+  --chat-shell-offset: 118px;
   --chat-shell-min: 600px;
   --chat-shell-max: 860px;
 }
@@ -73,7 +73,7 @@ img {
 .page-shell {
   position: relative;
   overflow: hidden;
-  padding-bottom: 28px;
+  padding: calc(78px + env(safe-area-inset-top, 0px)) 0 28px;
 }
 
 .page-shell::before,
@@ -101,6 +101,66 @@ img {
   width: 320px;
   height: 320px;
   background: rgba(35, 52, 48, 0.08);
+}
+
+.view-switcher {
+  position: fixed;
+  inset: calc(12px + env(safe-area-inset-top, 0px)) 0 auto;
+  z-index: 25;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.view-switcher-inner {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  width: min(420px, calc(100vw - 32px));
+  padding: 4px;
+  border: 1px solid rgba(31, 41, 39, 0.12);
+  border-radius: var(--radius-pill);
+  background: rgba(255, 252, 247, 0.78);
+  box-shadow:
+    0 18px 42px rgba(17, 22, 20, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(18px);
+  pointer-events: auto;
+}
+
+.view-switcher-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 18px;
+  border-radius: var(--radius-pill);
+  color: rgba(24, 32, 30, 0.72);
+  cursor: pointer;
+  font-weight: 800;
+  letter-spacing: 0;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    transform 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.view-switcher-button:hover {
+  transform: translateY(-1px);
+}
+
+.view-switcher-button:focus-visible {
+  outline: 2px solid rgba(195, 154, 105, 0.7);
+  outline-offset: 2px;
+}
+
+.view-switcher-button-active {
+  background: linear-gradient(135deg, #22322f, #3d564e);
+  color: #f8f0e5;
+  box-shadow:
+    0 10px 24px rgba(26, 38, 34, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .page-masthead,
@@ -146,6 +206,15 @@ img {
   white-space: nowrap;
 }
 
+.page-shell-shops .page-masthead {
+  padding: 6px 0 8px;
+}
+
+.page-shell-shops .page-masthead h1 {
+  font-size: clamp(2rem, 3.3vw, 3.35rem);
+  line-height: 0.96;
+}
+
 .masthead-title {
   font-family: var(--font-display), "STSong", "Songti SC", serif;
   letter-spacing: -0.08em;
@@ -153,7 +222,7 @@ img {
 
 .hero-section {
   position: relative;
-  min-height: calc(100svh - 18px);
+  min-height: calc(100svh - 112px);
   padding: 4px 0 40px;
 }
 
@@ -333,7 +402,7 @@ img {
   grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   align-self: start;
   position: sticky;
-  top: 20px;
+  top: calc(78px + env(safe-area-inset-top, 0px));
   min-height: min(var(--chat-shell-min), calc(100svh - var(--chat-shell-offset)));
   height: min(var(--chat-shell-max), calc(100svh - var(--chat-shell-offset)));
   max-height: calc(100svh - var(--chat-shell-offset));
@@ -648,6 +717,11 @@ img {
   padding: 2px 6px;
   border-radius: 6px;
   background: rgba(177, 130, 75, 0.08);
+}
+
+.inline-card-meta .inline-distance-current {
+  background: rgba(71, 105, 95, 0.12);
+  color: #28443d;
 }
 
 .waiting-banner {
@@ -1075,7 +1149,40 @@ img {
 }
 
 .guide-section {
-  padding: 56px 0 54px;
+  padding: 16px 0 54px;
+}
+
+.shop-map-top {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 12px;
+}
+
+.shop-map-heading {
+  display: flex;
+  align-items: end;
+  gap: 14px;
+}
+
+.shop-map-heading h2 {
+  margin: 0;
+  font-size: clamp(1.7rem, 3.2vw, 2.75rem);
+  line-height: 0.98;
+}
+
+.shop-map-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid rgba(140, 101, 65, 0.16);
+  border-radius: var(--radius-pill);
+  background: rgba(255, 252, 247, 0.76);
+  color: var(--accent-dark);
+  font-size: 0.86rem;
+  font-weight: 800;
 }
 
 .section-heading {
@@ -1130,7 +1237,7 @@ img {
   max-width: 22rem;
   margin: 0;
   color: var(--muted);
-  font-size: 0.86rem;
+  font-size: 0.78rem;
   line-height: 1.48;
   text-align: right;
 }
@@ -1146,8 +1253,71 @@ img {
 .guide-layout {
   display: grid;
   grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-  gap: 18px;
+  gap: 16px;
   align-items: start;
+}
+
+.shop-map-panel {
+  position: relative;
+  min-height: 238px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(40, 52, 49, 0.12);
+  border-radius: 28px;
+  background:
+    linear-gradient(135deg, rgba(255, 252, 247, 0.94), rgba(235, 231, 222, 0.8)),
+    rgba(255, 252, 247, 0.9);
+  box-shadow: 0 24px 68px rgba(17, 22, 20, 0.12);
+}
+
+.shop-map-canvas {
+  position: absolute;
+  inset: 0;
+  min-height: 100%;
+}
+
+.shop-map-state,
+.shop-map-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  text-align: center;
+}
+
+.shop-map-state {
+  color: var(--muted);
+  font-weight: 700;
+  background: rgba(255, 252, 247, 0.5);
+}
+
+.shop-map-fallback {
+  gap: 5px;
+  background:
+    linear-gradient(135deg, rgba(255, 252, 247, 0.9), rgba(238, 233, 224, 0.82)),
+    repeating-linear-gradient(
+      -35deg,
+      rgba(34, 49, 45, 0.04) 0,
+      rgba(34, 49, 45, 0.04) 1px,
+      transparent 1px,
+      transparent 16px
+    );
+}
+
+.shop-map-fallback p,
+.shop-map-fallback span {
+  margin: 0;
+}
+
+.shop-map-fallback p {
+  color: var(--accent-dark);
+  font-weight: 800;
+}
+
+.shop-map-fallback span {
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .guide-sidebar {
@@ -1201,8 +1371,136 @@ img {
 .guide-flow {
   display: grid;
   gap: 20px;
-  content-visibility: auto;
   animation: section-rise 0.7s cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+.map-marker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transform: translateY(-4px);
+  padding: 7px 10px 7px 7px;
+  border: 2px solid rgba(255, 252, 247, 0.96);
+  border-radius: 999px;
+  background: linear-gradient(135deg, #253833, #49665c);
+  color: #fff8ee;
+  box-shadow:
+    0 14px 28px rgba(17, 22, 20, 0.22),
+    0 0 0 6px rgba(37, 56, 51, 0.12);
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
+}
+
+.map-marker::after {
+  content: "";
+  position: absolute;
+  inset: auto 50% -8px auto;
+  width: 12px;
+  height: 12px;
+  border-right: 2px solid rgba(255, 252, 247, 0.96);
+  border-bottom: 2px solid rgba(255, 252, 247, 0.96);
+  background: #253833;
+  transform: translateX(50%) rotate(45deg);
+}
+
+.map-marker:hover,
+.map-marker-active {
+  transform: translateY(-8px);
+  background: linear-gradient(135deg, #d8ad73, #976a3f);
+  color: #181411;
+  box-shadow:
+    0 18px 34px rgba(128, 85, 46, 0.28),
+    0 0 0 8px rgba(177, 130, 75, 0.16);
+}
+
+.map-marker-active::after,
+.map-marker:hover::after {
+  background: #976a3f;
+}
+
+.map-marker-index {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(255, 252, 247, 0.92);
+  color: #253833;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.map-marker-label {
+  max-width: 10.5rem;
+  overflow: hidden;
+  font-size: 0.85rem;
+  font-weight: 800;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-info-window {
+  display: grid;
+  gap: 8px;
+  width: min(280px, 72vw);
+  padding: 2px;
+  color: var(--text);
+}
+
+.map-info-window h3,
+.map-info-eyebrow,
+.map-info-summary {
+  margin: 0;
+}
+
+.map-info-window h3 {
+  font-size: 1.12rem;
+  line-height: 1.18;
+}
+
+.map-info-eyebrow {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.map-info-summary {
+  color: rgba(24, 32, 30, 0.76);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.map-info-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.map-info-facts span {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: rgba(140, 101, 65, 0.1);
+  color: var(--accent-dark);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.map-info-button {
+  width: fit-content;
+  min-height: 34px;
+  padding: 7px 11px;
+  border-radius: var(--radius-pill);
+  background: #22322f;
+  color: #fff8ee;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 800;
 }
 
 .cafe-card {
@@ -1515,6 +1813,15 @@ img {
     max-width: 100%;
   }
 
+  .shop-map-top {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .shop-map-panel {
+    min-height: 220px;
+  }
+
   .location-status {
     text-align: left;
   }
@@ -1525,6 +1832,25 @@ img {
 }
 
 @media (max-width: 760px) {
+  .page-shell {
+    padding-top: calc(66px + env(safe-area-inset-top, 0px));
+  }
+
+  .view-switcher {
+    inset: calc(8px + env(safe-area-inset-top, 0px)) 0 auto;
+  }
+
+  .view-switcher-inner {
+    width: min(360px, calc(100vw - 20px));
+    padding: 3px;
+  }
+
+  .view-switcher-button {
+    min-height: 38px;
+    padding: 0 12px;
+    font-size: 0.86rem;
+  }
+
   .page-masthead,
   .hero-section,
   .guide-section {
@@ -1545,6 +1871,15 @@ img {
     font-size: clamp(2.45rem, 11vw, 3.95rem);
     white-space: normal;
     letter-spacing: -0.08em;
+  }
+
+  .page-shell-shops .page-masthead {
+    padding: 6px 0;
+  }
+
+  .page-shell-shops .page-masthead h1 {
+    font-size: clamp(1.85rem, 8vw, 2.55rem);
+    line-height: 0.98;
   }
 
   .masthead-title {
@@ -1609,9 +1944,9 @@ img {
   .chat-shell {
     height: auto;
     max-height: none;
-    min-height: min(calc(100svh - 68px), 760px);
-    height: min(calc(100svh - 68px), 760px);
-    max-height: min(calc(100svh - 68px), 760px);
+    min-height: min(calc(100svh - 176px), 680px);
+    height: min(calc(100svh - 176px), 680px);
+    max-height: min(calc(100svh - 176px), 680px);
     padding: 12px 12px 0;
     border-radius: 28px;
     box-shadow:
@@ -1829,8 +2164,41 @@ img {
     line-height: 1.02;
   }
 
+  .shop-map-top {
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .shop-map-heading {
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .shop-map-heading h2 {
+    font-size: clamp(1.45rem, 6vw, 2rem);
+  }
+
+  .shop-map-count {
+    min-height: 30px;
+    padding: 6px 10px;
+    font-size: 0.78rem;
+  }
+
   .guide-actions {
     gap: 8px;
+  }
+
+  .shop-map-top .guide-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .shop-map-panel {
+    min-height: 178px;
+    margin-bottom: 12px;
+    border-radius: 22px;
   }
 
   .location-button {
@@ -1839,11 +2207,29 @@ img {
   }
 
   .location-status {
+    max-width: min(100%, 16rem);
     font-size: 0.8rem;
   }
 
   .guide-layout {
     gap: 14px;
+  }
+
+  .map-marker {
+    padding: 6px;
+    box-shadow:
+      0 12px 24px rgba(17, 22, 20, 0.2),
+      0 0 0 5px rgba(37, 56, 51, 0.12);
+  }
+
+  .map-marker-index {
+    width: 24px;
+    height: 24px;
+    font-size: 0.74rem;
+  }
+
+  .map-marker-label {
+    display: none;
   }
 
   .guide-sidebar {
@@ -1867,7 +2253,7 @@ img {
   }
 
   .guide-copy {
-    border-radius: 22px;
+    display: none;
   }
 
   .cafe-card {
@@ -1978,6 +2364,7 @@ img {
 }
 
 @media (hover: none) and (pointer: coarse) {
+  .view-switcher-button:active,
   .prompt-chip:active,
   .prompt-toggle:active,
   .guide-tab:active,

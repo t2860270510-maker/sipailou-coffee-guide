@@ -7,6 +7,7 @@ export type DistancePref = "near" | "walk_ok" | "any";
 export type SocketNeed = "required" | "preferred" | "no";
 export type StayIntent = "short" | "long" | "any";
 export type GuideGroupId =
+  | "all"
   | "early"
   | "study"
   | "chat"
