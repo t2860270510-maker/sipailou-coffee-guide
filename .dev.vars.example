@@ -3,3 +3,4 @@ MINIMAX_BASE_URL=https://api.minimaxi.com/anthropic
 MINIMAX_MODEL=MiniMax-M2.7
 MINIMAX_FALLBACK_MODELS=MiniMax-M2.5
 MINIMAX_API_KEY=replace-with-your-own-key
+AMAP_WEB_KEY=replace-with-your-own-amap-web-service-key

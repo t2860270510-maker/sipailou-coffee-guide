@@ -394,6 +394,7 @@ img {
 .prompt-toggle,
 .guide-tab,
 .composer-send,
+.location-button,
 .text-button,
 .close-button,
 .result-card {
@@ -761,6 +762,11 @@ img {
   font-size: 0.9rem;
 }
 
+.meta-grid .distance-pill {
+  background: rgba(71, 105, 95, 0.12);
+  color: #28443d;
+}
+
 .reason-list {
   gap: 10px;
   margin: 14px 0 0;
@@ -1007,6 +1013,53 @@ img {
   line-height: 1.7;
 }
 
+.guide-actions {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+  max-width: 22rem;
+}
+
+.location-button {
+  min-height: 42px;
+  padding: 10px 15px;
+  border: 1px solid rgba(140, 101, 65, 0.18);
+  border-radius: var(--radius-pill);
+  background:
+    linear-gradient(180deg, rgba(255, 252, 247, 0.96), rgba(247, 241, 232, 0.9)),
+    rgba(255, 252, 247, 0.92);
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 700;
+  box-shadow: 0 12px 24px rgba(17, 22, 20, 0.07);
+}
+
+.location-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.location-button-loading {
+  border-color: rgba(177, 130, 75, 0.32);
+}
+
+.location-status {
+  max-width: 22rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.48;
+  text-align: right;
+}
+
+.location-status-ready {
+  color: #47695f;
+}
+
+.location-status-error {
+  color: #a05b42;
+}
+
 .guide-layout {
   display: grid;
   grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
@@ -1226,6 +1279,34 @@ img {
   margin-top: 22px;
 }
 
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.photo-card {
+  min-width: 0;
+  margin: 0;
+}
+
+.photo-frame {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(57, 38, 24, 0.14), rgba(212, 186, 151, 0.22));
+}
+
+.photo-card figcaption {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.52;
+}
+
 .source-note {
   margin-top: 22px;
   font-size: 0.92rem;
@@ -1344,6 +1425,15 @@ img {
 
   .guide-sidebar {
     position: static;
+  }
+
+  .guide-actions {
+    justify-items: start;
+    max-width: 100%;
+  }
+
+  .location-status {
+    text-align: left;
   }
 
   .drawer-panel {
@@ -1656,6 +1746,19 @@ img {
     line-height: 1.02;
   }
 
+  .guide-actions {
+    gap: 8px;
+  }
+
+  .location-button {
+    min-height: 40px;
+    padding: 9px 13px;
+  }
+
+  .location-status {
+    font-size: 0.8rem;
+  }
+
   .guide-layout {
     gap: 14px;
   }
@@ -1746,6 +1849,20 @@ img {
   .drawer-summary,
   .drawer-section p {
     line-height: 1.68;
+  }
+
+  .photo-grid {
+    display: flex;
+    gap: 12px;
+    margin-right: -16px;
+    overflow-x: auto;
+    padding: 0 16px 4px 0;
+    scroll-snap-type: x proximity;
+  }
+
+  .photo-card {
+    flex: 0 0 min(78vw, 300px);
+    scroll-snap-align: start;
   }
 
   .drawer-facts {

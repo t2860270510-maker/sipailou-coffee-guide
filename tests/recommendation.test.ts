@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { cafes } from "../lib/cafes";
 import { extractDeepSeekText, getDeepSeekRuntimeSnapshot } from "../lib/deepseek";
 import { buildCafeContextBlock, buildRecommendationPrompt, DEEPSEEK_SYSTEM_PROMPT } from "../lib/deepseek-prompts";
+import { formatStaticWalk, getCafeDestination } from "../lib/location";
 import { getGuideGroupMatches, parseRecommendationQuery } from "../lib/recommendation";
 
 function run(name: string, assertion: () => void) {
@@ -34,6 +35,30 @@ run("cafe context block contains structured facts", () => {
   assert.match(context, /walk=/);
   assert.match(context, /socket=/);
   assert.match(context, /items=/);
+});
+
+run("all cafes have map coordinates and image gallery entries", () => {
+  for (const cafe of cafes) {
+    assert.ok(Number.isFinite(cafe.longitude), `${cafe.id} longitude`);
+    assert.ok(Number.isFinite(cafe.latitude), `${cafe.id} latitude`);
+    assert.ok(cafe.imageGallery.length >= 1, `${cafe.id} image gallery`);
+    assert.ok(cafe.imageGallery.every((image) => image.src && image.alt && image.caption), `${cafe.id} image metadata`);
+  }
+});
+
+run("cafe destination prefers entrance coordinates when available", () => {
+  const cafeMo = cafes.find((cafe) => cafe.id === "cafe-mo");
+  assert.ok(cafeMo);
+
+  const destination = getCafeDestination(cafeMo);
+  assert.equal(destination.longitude, cafeMo.entranceLongitude);
+  assert.equal(destination.latitude, cafeMo.entranceLatitude);
+});
+
+run("static walk label keeps the campus reference distance", () => {
+  const standingRoom = cafes.find((cafe) => cafe.id === "standing-room");
+  assert.ok(standingRoom);
+  assert.match(formatStaticWalk(standingRoom), /从南门约 2 分钟 \/ 150m/);
 });
 
 run("study group keeps the strongest long-stay option", () => {
@@ -69,7 +94,7 @@ run("non-stream fallback only keeps the assistant text blocks", () => {
   assert.equal(text, "先去凯瑟琳星巴克。如果嫌远，再看 Disc Coffee。");
 });
 
-function withEnv(overrides: NodeJS.ProcessEnv, assertion: () => void) {
+function withEnv(overrides: Record<string, string>, assertion: () => void) {
   const keys = [
     "DEEPSEEK_API_KEY",
     "DEEPSEEK_BASE_URL",

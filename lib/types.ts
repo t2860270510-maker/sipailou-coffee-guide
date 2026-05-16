@@ -20,6 +20,13 @@ export interface Cafe {
   nearestGate: string;
   walkDistanceM: number;
   walkTimeMin: number;
+  amapPoiId?: string;
+  longitude: number;
+  latitude: number;
+  entranceLongitude?: number;
+  entranceLatitude?: number;
+  amapAddress?: string;
+  poiVerifiedAt?: string;
   weekdayHours: string;
   weekendHours: string;
   earlyFriendly: "yes" | "maybe" | "no";
@@ -34,6 +41,13 @@ export interface Cafe {
   sourceNote: string;
   verifiedAt: string;
   coverImage: string;
+  imageGallery: CafeImage[];
+}
+
+export interface CafeImage {
+  src: string;
+  alt: string;
+  caption: string;
 }
 
 export interface GuideGroup {

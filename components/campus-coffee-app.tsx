@@ -3,6 +3,11 @@
 import Image from "next/image";
 import { useDeferredValue, useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 
+import {
+  formatStaticWalk,
+  formatWalkingDistance,
+  type WalkingDistanceMap,
+} from "../lib/location";
 import { getGuideGroupMatches } from "../lib/recommendation";
 import type {
   Cafe,
@@ -46,6 +51,13 @@ type ConversationItem = {
   role: "assistant" | "user";
   type: "intro" | "text" | "streaming";
   content: string;
+};
+
+type DistanceStatus = "idle" | "locating" | "loading" | "ready" | "error";
+
+type DistanceResponse = {
+  distances?: WalkingDistanceMap;
+  message?: string;
 };
 
 const initialConversation: ConversationItem[] = [
@@ -110,6 +122,30 @@ async function readErrorMessage(response: Response) {
   return text.trim() || "推荐服务暂时不可用，请稍后再试。";
 }
 
+async function readDistancePayload(response: Response) {
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (!contentType.includes("application/json")) {
+    return {
+      message: (await response.text().catch(() => "")).trim(),
+    } satisfies DistanceResponse;
+  }
+
+  return ((await response.json().catch(() => ({}))) ?? {}) as DistanceResponse;
+}
+
+function toGeolocationErrorMessage(error: GeolocationPositionError) {
+  if (error.code === error.PERMISSION_DENIED) {
+    return "没有获得定位权限，先显示校门步行距离。";
+  }
+
+  if (error.code === error.TIMEOUT) {
+    return "定位响应有点慢，先显示校门步行距离。";
+  }
+
+  return "暂时没拿到当前位置，先显示校门步行距离。";
+}
+
 type CampusCoffeeAppProps = {
   cafes: Cafe[];
   guideGroups: GuideGroup[];
@@ -128,6 +164,9 @@ export function CampusCoffeeApp({
   const [pendingStageIndex, setPendingStageIndex] = useState(0);
   const [pendingSeconds, setPendingSeconds] = useState(0);
   const [selectedCafe, setSelectedCafe] = useState<Cafe | null>(null);
+  const [distanceStatus, setDistanceStatus] = useState<DistanceStatus>("idle");
+  const [distanceMessage, setDistanceMessage] = useState("可开启定位，查看从你当前位置出发的步行时间。");
+  const [walkingDistances, setWalkingDistances] = useState<WalkingDistanceMap>({});
   const [activeGuideGroup, setActiveGuideGroup] = useState<GuideGroupId>("early");
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [isPromptTrayOpen, setIsPromptTrayOpen] = useState(false);
@@ -139,6 +178,7 @@ export function CampusCoffeeApp({
   const showQuickPrompts = !hasTypedQuery && conversation.length <= initialConversation.length;
   const hasConversationStarted = conversation.length > initialConversation.length;
   const showFollowupPrompts = !hasTypedQuery && hasConversationStarted && !isSubmitting;
+  const isDistanceLoading = distanceStatus === "locating" || distanceStatus === "loading";
   const activeStreamingMessage = [...conversation]
     .reverse()
     .find((item) => item.role === "assistant" && item.type === "streaming");
@@ -343,6 +383,64 @@ export function CampusCoffeeApp({
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  async function fetchWalkingDistances(position: GeolocationPosition) {
+    setDistanceStatus("loading");
+    setDistanceMessage("正在计算从你当前位置出发的步行时间。");
+
+    try {
+      const response = await fetch("/api/distances", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          longitude: position.coords.longitude,
+          latitude: position.coords.latitude,
+          coordinateSystem: "gps",
+        }),
+      });
+
+      const payload = await readDistancePayload(response);
+
+      if (!response.ok) {
+        throw new Error(payload.message || "步行距离暂时不可用，先显示校门距离。");
+      }
+
+      setWalkingDistances(payload.distances ?? {});
+      setDistanceStatus("ready");
+      setDistanceMessage(payload.message ?? "已根据你的位置更新步行距离。");
+    } catch (error) {
+      setDistanceStatus("error");
+      setDistanceMessage(error instanceof Error ? error.message : "步行距离暂时不可用，先显示校门距离。");
+    }
+  }
+
+  function requestWalkingDistances() {
+    if (!("geolocation" in navigator)) {
+      setDistanceStatus("error");
+      setDistanceMessage("当前浏览器不支持定位，先显示校门步行距离。");
+      return;
+    }
+
+    setDistanceStatus("locating");
+    setDistanceMessage("正在请求定位权限。");
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        void fetchWalkingDistances(position);
+      },
+      (error) => {
+        setDistanceStatus("error");
+        setDistanceMessage(toGeolocationErrorMessage(error));
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 5 * 60 * 1000,
+        timeout: 10000,
+      },
+    );
   }
 
   return (
@@ -567,7 +665,20 @@ export function CampusCoffeeApp({
             <p className="eyebrow">咖啡地图</p>
             <h2>往下滑，是一份可以慢慢逛的四牌楼咖啡地图</h2>
           </div>
-          <p className="section-note">你也可以不走输入框，直接按场景把整份内容翻一遍。</p>
+          <div className="guide-actions">
+            <p className="section-note">你也可以不走输入框，直接按场景把整份内容翻一遍。</p>
+            <button
+              className={`location-button ${isDistanceLoading ? "location-button-loading" : ""}`}
+              type="button"
+              onClick={requestWalkingDistances}
+              disabled={isDistanceLoading}
+            >
+              {isDistanceLoading ? "正在更新距离" : distanceStatus === "ready" ? "重新定位" : "使用当前位置"}
+            </button>
+            <p className={`location-status location-status-${distanceStatus}`} role="status" aria-live="polite">
+              {distanceMessage}
+            </p>
+          </div>
         </div>
 
         <div className="guide-layout">
@@ -624,7 +735,10 @@ export function CampusCoffeeApp({
 
                   <div className="meta-grid">
                     <span>{cafe.nearestGate}</span>
-                    <span>{cafe.walkDistanceM}m</span>
+                    <span>{formatStaticWalk(cafe)}</span>
+                    {walkingDistances[cafe.id] ? (
+                      <span className="distance-pill">{formatWalkingDistance(walkingDistances[cafe.id])}</span>
+                    ) : null}
                     <span>{cafe.weekdayHours}</span>
                     <span>{formatPrice(cafe.priceLevel)}</span>
                   </div>
@@ -689,9 +803,15 @@ export function CampusCoffeeApp({
                   <dd>{selectedCafe.nearestGate}</dd>
                 </div>
                 <div>
-                  <dt>步行时间</dt>
-                  <dd>{selectedCafe.walkTimeMin} 分钟</dd>
+                  <dt>校门步行</dt>
+                  <dd>{formatStaticWalk(selectedCafe)}</dd>
                 </div>
+                {walkingDistances[selectedCafe.id] ? (
+                  <div>
+                    <dt>当前位置</dt>
+                    <dd>{formatWalkingDistance(walkingDistances[selectedCafe.id])}</dd>
+                  </div>
+                ) : null}
                 <div>
                   <dt>工作日营业</dt>
                   <dd>{selectedCafe.weekdayHours}</dd>
@@ -728,8 +848,29 @@ export function CampusCoffeeApp({
                 <p>{selectedCafe.notes}</p>
               </div>
 
+              <div className="drawer-section">
+                <p className="eyebrow">店铺图片</p>
+                <div className="photo-grid" aria-label={`${selectedCafe.name} 图片介绍`}>
+                  {selectedCafe.imageGallery.map((image) => (
+                    <figure key={`${selectedCafe.id}-${image.src}-${image.caption}`} className="photo-card">
+                      <div className="photo-frame">
+                        <Image
+                          src={image.src}
+                          alt={image.alt}
+                          fill
+                          sizes="(max-width: 800px) 78vw, 18vw"
+                          className="cafe-image"
+                        />
+                      </div>
+                      <figcaption>{image.caption}</figcaption>
+                    </figure>
+                  ))}
+                </div>
+              </div>
+
               <p className="source-note">
                 整理来源：{selectedCafe.sourceNote}，最近整理时间 {selectedCafe.verifiedAt}
+                {selectedCafe.poiVerifiedAt ? `；高德 POI 校准 ${selectedCafe.poiVerifiedAt}` : ""}
               </p>
             </div>
           </div>

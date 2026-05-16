@@ -10,3 +10,4 @@ out
 .netlify
 .open-next
 .wrangler
+tsconfig.tsbuildinfo
