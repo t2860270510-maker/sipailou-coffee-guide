@@ -4,7 +4,7 @@ import { cafes } from "../lib/cafes";
 import { extractDeepSeekText, getDeepSeekRuntimeSnapshot } from "../lib/deepseek";
 import { buildCafeContextBlock, buildRecommendationPrompt, DEEPSEEK_SYSTEM_PROMPT } from "../lib/deepseek-prompts";
 import { formatStaticWalk, getCafeDestination } from "../lib/location";
-import { getGuideGroupMatches, parseRecommendationQuery } from "../lib/recommendation";
+import { buildLocalRecommendation, getGuideGroupMatches, parseRecommendationQuery } from "../lib/recommendation";
 
 function run(name: string, assertion: () => void) {
   try {
@@ -82,6 +82,51 @@ run("recommendation prompt asks for a chat-style reply from the provided cafes",
   const prompt = buildRecommendationPrompt("想和朋友坐坐聊天，离学校近一点");
   assert.match(prompt, /流式输出/);
   assert.match(prompt, /\[Available Cafes\]/);
+});
+
+run("buildLocalRecommendation produces card meta with exactly two picks and fit reasons", () => {
+  const result = buildLocalRecommendation("下午想写论文，最好安静一点");
+
+  assert.ok(Array.isArray(result.topPicks));
+  assert.equal(result.topPicks.length, 2);
+
+  for (const pick of result.topPicks) {
+    assert.ok(pick.cafe.id);
+    assert.ok(Array.isArray(pick.fitReasons));
+    assert.ok(pick.fitReasons.length >= 1);
+    assert.ok(typeof pick.fitReasons[0] === "string");
+    assert.ok(pick.fitReasons[0].length > 0);
+  }
+});
+
+run("buildLocalRecommendation serializes to the expected stream header format", () => {
+  const result = buildLocalRecommendation("赶时间顺路带一杯");
+  const cards = result.topPicks.map((pick) => ({
+    id: pick.cafe.id,
+    fitReason: pick.fitReasons[0] ?? pick.cafe.summary,
+  }));
+
+  const header = JSON.stringify({ cards });
+
+  assert.equal(cards.length, 2);
+  assert.equal(typeof header, "string");
+  assert.ok(header.includes('"cards"'));
+  assert.ok(header.includes(cards[0].id));
+  assert.ok(header.includes(cards[1].id));
+
+  const parsed = JSON.parse(header) as { cards: { id: string; fitReason: string }[] };
+  assert.equal(parsed.cards.length, 2);
+  for (const card of parsed.cards) {
+    assert.ok(card.id);
+    assert.ok(card.fitReason);
+  }
+});
+
+run("buildLocalRecommendation with chat intent picks chat-friendly cafes", () => {
+  const result = buildLocalRecommendation("想和朋友见面聊天，离学校近一点");
+  const ids = result.topPicks.map((p) => p.cafe.id);
+  assert.ok(ids.some((id) => id === "disc-coffee" || id === "joymean" || id === "clip-coffee"),
+    "expected at least one chat-friendly cafe");
 });
 
 run("non-stream fallback only keeps the assistant text blocks", () => {

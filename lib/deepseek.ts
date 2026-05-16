@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { buildRecommendationPrompt, DEEPSEEK_SYSTEM_PROMPT } from "./deepseek-prompts";
+import { buildLocalRecommendation } from "./recommendation";
 
 const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com/anthropic";
 const DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash";
@@ -268,6 +269,40 @@ function sseToTextStream(stream: ReadableStream<Uint8Array>) {
   });
 }
 
+function buildCardMetaHeader(rawQuery: string) {
+  try {
+    const result = buildLocalRecommendation(rawQuery);
+    const cards = result.topPicks.map((pick) => ({
+      id: pick.cafe.id,
+      fitReason: pick.fitReasons[0] ?? pick.cafe.summary,
+    }));
+    return JSON.stringify({ cards }) + "\n";
+  } catch {
+    return "";
+  }
+}
+
+function prependToStream(header: Uint8Array, inner: ReadableStream<Uint8Array>) {
+  if (header.length === 0) return inner;
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      controller.enqueue(header);
+      const reader = inner.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          controller.enqueue(value);
+        }
+      } finally {
+        reader.releaseLock();
+        controller.close();
+      }
+    },
+  });
+}
+
 export async function recommendWithDeepSeekStream(rawQuery: string) {
   const config = getDeepSeekConfig();
   if (!config) {
@@ -287,7 +322,10 @@ export async function recommendWithDeepSeekStream(rawQuery: string) {
         prompt,
       });
 
-      return new Response(sseToTextStream(response.body as ReadableStream<Uint8Array>), {
+      const headerBytes = new TextEncoder().encode(buildCardMetaHeader(rawQuery));
+      const textStream = sseToTextStream(response.body as ReadableStream<Uint8Array>);
+
+      return new Response(prependToStream(headerBytes, textStream), {
         headers: {
           "Content-Type": "text/plain; charset=utf-8",
           "Cache-Control": "no-store",
@@ -305,7 +343,7 @@ export async function recommendWithDeepSeekStream(rawQuery: string) {
         prompt,
       });
 
-      return new Response(text, {
+      return new Response(buildCardMetaHeader(rawQuery) + text, {
         headers: {
           "Content-Type": "text/plain; charset=utf-8",
           "Cache-Control": "no-store",

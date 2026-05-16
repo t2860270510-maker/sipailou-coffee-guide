@@ -170,6 +170,7 @@ export function CampusCoffeeApp({
   const [activeGuideGroup, setActiveGuideGroup] = useState<GuideGroupId>("early");
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [isPromptTrayOpen, setIsPromptTrayOpen] = useState(false);
+  const [cardMeta, setCardMeta] = useState<Record<string, { id: string; fitReason: string }[]>>({});
   const deferredGuideGroup = useDeferredValue(activeGuideGroup);
   const [isPending, startTransition] = useTransition();
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -338,20 +339,55 @@ export function CampusCoffeeApp({
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let streamedText = "";
+      let headerParsed = false;
+      let lineBuffer = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) {
-          streamedText += decoder.decode();
+          streamedText += lineBuffer + decoder.decode();
           break;
         }
 
-        streamedText += decoder.decode(value, { stream: true });
-        const nextContent = streamedText;
+        const rawChunk = lineBuffer + decoder.decode(value, { stream: true });
+        lineBuffer = "";
+
+        if (!headerParsed) {
+          const newlineIdx = rawChunk.indexOf("\n");
+          if (newlineIdx !== -1) {
+            const headerLine = rawChunk.slice(0, newlineIdx);
+            streamedText = rawChunk.slice(newlineIdx + 1);
+            headerParsed = true;
+
+            try {
+              const meta = JSON.parse(headerLine) as { cards?: { id: string; fitReason: string }[] };
+              if (meta.cards?.length) {
+                const cards = meta.cards;
+                setCardMeta((prev) => ({ ...prev, [loadingId]: cards }));
+              }
+            } catch {
+              // 首行不是合法 JSON，整体当纯文本处理
+              streamedText = rawChunk;
+            }
+          } else {
+            // 还没收到换行符，继续缓冲
+            lineBuffer = rawChunk;
+            if (lineBuffer.length > 600) {
+              // 首行长到不可能是 JSON 头行，整体当文本处理
+              streamedText = lineBuffer;
+              lineBuffer = "";
+              headerParsed = true;
+            }
+            continue;
+          }
+        } else {
+          streamedText += rawChunk;
+        }
+
         setConversation((current) =>
           current.map((item) =>
             item.id === loadingId
-              ? { ...item, type: "streaming", content: nextContent }
+              ? { ...item, type: "streaming", content: streamedText }
               : item,
           ),
         );
@@ -497,6 +533,39 @@ export function CampusCoffeeApp({
                     >
                       {messageContent}
                     </p>
+                    {item.role === "assistant" && cardMeta[item.id]?.length ? (
+                      <div className="inline-cards">
+                        {cardMeta[item.id].map((card) => {
+                          const cafe = cafes.find((c) => c.id === card.id);
+                          if (!cafe) return null;
+                          return (
+                            <button
+                              key={card.id}
+                              className="inline-card"
+                              type="button"
+                              onClick={() => setSelectedCafe(cafe)}
+                            >
+                              <div className="inline-card-image">
+                                <Image
+                                  src={cafe.coverImage}
+                                  alt={cafe.name}
+                                  fill
+                                  sizes="72px"
+                                />
+                              </div>
+                              <div className="inline-card-body">
+                                <p className="inline-card-name">{cafe.name}</p>
+                                <p className="inline-card-reason">{card.fitReason}</p>
+                                <div className="inline-card-meta">
+                                  <span>{formatStaticWalk(cafe)}</span>
+                                  <span>{formatPrice(cafe.priceLevel)}</span>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                   </article>
                 );
               })}
