@@ -1,44 +1,51 @@
-import { cafes } from "./cafes";
+import type { RecommendationResult } from "./types";
 
-function formatCafeContext(index: number) {
-  const cafe = cafes[index];
+export const DEFAULT_PROMPT_STYLE = "像熟悉四牌楼周边的朋友，克制、具体、自然；四段以内，不写营销话术。";
+
+export const FIXED_MODEL_GUARDRAILS = [
+  "只能解释规则引擎已经选中的店铺，不能新增、替换或删除店铺。",
+  "只能使用事实清单里的内容，不得推测营业时间、价格、距离、座位、插座、菜单或氛围。",
+  "返回 JSON 对象，selectedCafeIds 必须与输入顺序完全一致，text 是完整中文推荐正文。",
+  "正文必须明确点名每家入选店；不要提及未入选店铺。",
+  "如果无法遵守，返回空 text，不要自行补充。",
+];
+
+export function buildExplanationPrompt(result: RecommendationResult, promptStyle = DEFAULT_PROMPT_STYLE) {
+  const selected = result.topPicks.map((pick) => ({
+    id: pick.cafe.id,
+    name: pick.cafe.name,
+    aliases: pick.cafe.aliases,
+    facts: {
+      location: pick.cafe.locationText,
+      nearestGate: pick.cafe.nearestGate,
+      staticWalkDistanceM: pick.cafe.walkDistanceM,
+      staticWalkTimeMin: pick.cafe.walkTimeMin,
+      weekdayHours: pick.cafe.weekdayHours,
+      weekendHours: pick.cafe.weekendHours,
+      priceRangeCny: pick.cafe.priceRange,
+      priceLevel: pick.cafe.priceLevel,
+      quietScore: pick.cafe.quietScore,
+      socketLevel: pick.cafe.socketLevel,
+      seatLevel: pick.cafe.seatLevel,
+      takeout: pick.cafe.takeout,
+      tags: pick.cafe.tags,
+      items: pick.cafe.recommendedItems,
+      summary: pick.cafe.summary,
+      notes: pick.cafe.notes,
+      verifiedAt: pick.cafe.verifiedAt,
+    },
+    ruleReasons: pick.fitReasons,
+    ruleTradeoffs: pick.tradeoffs,
+  }));
+
   return [
-    `${cafe.id} | ${cafe.name}`,
-    `gate=${cafe.nearestGate}; walk=${cafe.walkTimeMin}min/${cafe.walkDistanceM}m; weekday=${cafe.weekdayHours}; weekend=${cafe.weekendHours}`,
-    `scene=${cafe.mainScene}; early=${cafe.earlyFriendly}; price=${cafe.priceLevel}; quiet=${cafe.quietScore}; socket=${cafe.socketLevel}`,
-    `tags=${cafe.tags.join(", ")}; items=${cafe.recommendedItems.join(", ")}`,
-    `summary=${cafe.summary}`,
-    `note=${cafe.notes}`,
+    "你是『四牌楼咖啡指北』的解释编辑。推荐选择已经由本地规则引擎完成。",
+    "不可更改的规则：",
+    ...FIXED_MODEL_GUARDRAILS.map((rule) => `- ${rule}`),
+    `编辑语气：${promptStyle}`,
+    `用户需求摘要：${result.parsedRequestSummary}`,
+    `本地兜底正文：${result.explanation}`,
+    `唯一允许引用的店铺事实：${JSON.stringify(selected)}`,
+    '只输出形如 {"selectedCafeIds":["id1","id2"],"text":"完整正文"} 的 JSON。',
   ].join("\n");
-}
-
-export const DEEPSEEK_SYSTEM_PROMPT = `
-你是「四牌楼咖啡指北」里的推荐助手。你要根据用户当前需求，在提供给你的 8 家店里亲自选出最适合的 2 家，并像一个懂附近店的人给朋友建议那样解释原因。
-
-硬性规则：
-- 只能推荐 2 家，而且必须从提供的店铺列表里选择。
-- 不能编造任何营业时间、距离、价格、插座、安静程度或氛围事实。
-- 优先根据用户需求做判断，不要套模板，不要把所有店说成“都可以”。
-- 直接输出自然中文，不要输出 JSON，不要输出 Markdown 表格，不要输出代码块。
-- 不要用英文黑话、模型口吻、客服腔或营销词，也不要写“作为 AI”“综合来看”“结论如下”这类套话。
-- 第一段就直接点名这次最推荐的 2 家。
-- 整体控制在 4 段以内，像聊天回复一样，简洁但要说清楚差别。
-- 如果用户在意插座，除了凯瑟琳星巴克，不要主动把别家说成插座友好。
-`.trim();
-
-export function buildCafeContextBlock() {
-  return cafes.map((_, index) => [`[Cafe ${index + 1}]`, formatCafeContext(index)].join("\n")).join("\n\n");
-}
-
-export function buildRecommendationPrompt(rawQuery: string) {
-  return `
-[User Query]
-${rawQuery}
-
-[Available Cafes]
-${buildCafeContextBlock()}
-
-[Output Reminder]
-请直接流式输出一段适合出现在聊天框里的自然中文回复。
-`.trim();
 }

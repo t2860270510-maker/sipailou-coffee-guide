@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useDeferredValue, useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { CafeMap } from "./cafe-map";
 import {
@@ -9,7 +9,8 @@ import {
   formatWalkingDistance,
   type WalkingDistanceMap,
 } from "../lib/location";
-import { getGuideGroupMatches } from "../lib/recommendation";
+import { cafeMatchesGroup } from "../lib/recommendation";
+import { safeParseEventData, SseParser } from "../lib/sse";
 import type {
   Cafe,
   EditorialMoment,
@@ -52,6 +53,7 @@ type ConversationItem = {
   role: "assistant" | "user";
   type: "intro" | "text" | "streaming";
   content: string;
+  selectedCafeIds?: string[];
 };
 
 type DistanceStatus = "idle" | "locating" | "loading" | "ready" | "error";
@@ -59,6 +61,13 @@ type DistanceStatus = "idle" | "locating" | "loading" | "ready" | "error";
 type DistanceResponse = {
   distances?: WalkingDistanceMap;
   message?: string;
+  error?: { code: string; message: string; requestId: string };
+};
+
+type RecommendationEvent = {
+  selectedCafeIds: string[];
+  localText: string;
+  picks: Array<{ cafe: Cafe; fitReasons: string[] }>;
 };
 
 type ActiveView = "chat" | "shops";
@@ -134,8 +143,8 @@ async function readErrorMessage(response: Response) {
   const contentType = response.headers.get("content-type") ?? "";
 
   if (contentType.includes("application/json")) {
-    const payload = (await response.json().catch(() => null)) as { message?: string } | null;
-    return payload?.message ?? "推荐服务暂时不可用，请稍后再试。";
+    const payload = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
+    return payload?.error?.message ?? "推荐服务暂时不可用，请稍后再试。";
   }
 
   const text = await response.text().catch(() => "");
@@ -184,19 +193,25 @@ export function CampusCoffeeApp({
   const [pendingStageIndex, setPendingStageIndex] = useState(0);
   const [pendingSeconds, setPendingSeconds] = useState(0);
   const [selectedCafe, setSelectedCafe] = useState<Cafe | null>(null);
+  const [highlightedCafeId, setHighlightedCafeId] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ActiveView>("chat");
   const [distanceStatus, setDistanceStatus] = useState<DistanceStatus>("idle");
-  const [distanceMessage, setDistanceMessage] = useState("访问后会请求定位，用来计算你到每家店的步行时间。");
+  const [distanceMessage, setDistanceMessage] = useState("不会自动请求定位；点击后才计算你到每家店的步行时间。");
   const [walkingDistances, setWalkingDistances] = useState<WalkingDistanceMap>({});
   const [activeGuideGroup, setActiveGuideGroup] = useState<GuideGroupId>("all");
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [isPromptTrayOpen, setIsPromptTrayOpen] = useState(false);
   const [cardMeta, setCardMeta] = useState<Record<string, { id: string; fitReason: string }[]>>({});
+  const [statusAnnouncement, setStatusAnnouncement] = useState("可以开始提问");
+  const [userCoordinate, setUserCoordinate] = useState<{ longitude: number; latitude: number } | null>(null);
+  const activeCafes = useMemo(() => cafes.filter((cafe) => cafe.status === "active"), [cafes]);
   const deferredGuideGroup = useDeferredValue(activeGuideGroup);
   const [isPending, startTransition] = useTransition();
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
   const queryInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const hasRequestedInitialLocationRef = useRef(false);
+  const mainRef = useRef<HTMLElement | null>(null);
+  const drawerCloseRef = useRef<HTMLButtonElement | null>(null);
+  const lastDialogTriggerRef = useRef<HTMLElement | null>(null);
   const hasTypedQuery = query.trim().length > 0;
   const showQuickPrompts = !hasTypedQuery && conversation.length <= initialConversation.length;
   const hasConversationStarted = conversation.length > initialConversation.length;
@@ -230,7 +245,7 @@ export function CampusCoffeeApp({
       : "像平时发消息一样输入就行。";
 
   const activeGroupMeta = guideGroups.find((group) => group.id === deferredGuideGroup) ?? guideGroups[0];
-  const visibleCafes = getGuideGroupMatches(deferredGuideGroup);
+  const visibleCafes = cafes.filter((cafe) => cafe.status === "active" && cafeMatchesGroup(cafe, deferredGuideGroup));
 
   function formatCafeWalk(cafe: Cafe) {
     const liveDistance = walkingDistances[cafe.id];
@@ -322,10 +337,36 @@ export function CampusCoffeeApp({
     if (!selectedCafe) return;
 
     document.body.classList.add("drawer-open");
+    const background = Array.from(mainRef.current?.children ?? []).filter(
+      (element) => !(element as HTMLElement).classList.contains("detail-drawer"),
+    ) as HTMLElement[];
+    background.forEach((element) => {
+      element.setAttribute("inert", "");
+      element.setAttribute("aria-hidden", "true");
+    });
+    window.requestAnimationFrame(() => drawerCloseRef.current?.focus());
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        event.preventDefault();
         setSelectedCafe(null);
+        return;
+      }
+      if (event.key === "Tab") {
+        const panel = drawerCloseRef.current?.closest(".drawer-panel");
+        const focusable = Array.from(
+          panel?.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [],
+        );
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
       }
     };
 
@@ -334,28 +375,54 @@ export function CampusCoffeeApp({
     return () => {
       document.body.classList.remove("drawer-open");
       window.removeEventListener("keydown", handleKeyDown);
+      background.forEach((element) => {
+        element.removeAttribute("inert");
+        element.removeAttribute("aria-hidden");
+      });
+      lastDialogTriggerRef.current?.focus();
     };
   }, [selectedCafe]);
 
-  useEffect(() => {
-    if (hasRequestedInitialLocationRef.current) return;
-    hasRequestedInitialLocationRef.current = true;
+  function openCafe(cafe: Cafe, trigger?: HTMLElement | null) {
+    lastDialogTriggerRef.current = trigger ?? (document.activeElement as HTMLElement | null);
+    setHighlightedCafeId(cafe.id);
+    setSelectedCafe(cafe);
+  }
 
-    requestWalkingDistances();
-  }, []);
+  function closeCafe() {
+    setSelectedCafe(null);
+  }
+
+  function clearConversation() {
+    setConversation(initialConversation);
+    setCardMeta({});
+    setQuery("");
+    setFormError(null);
+    setStatusAnnouncement("会话已清空");
+    window.requestAnimationFrame(() => queryInputRef.current?.focus());
+  }
 
   async function submitPrompt(nextQuery?: string) {
     const payload = (nextQuery ?? query).trim();
-    if (!payload) {
+    if (payload.length < 2) {
       setFormError("先写一句需求，比如“下午想找个地方写论文”。");
+      return;
+    }
+    if (payload.length > 400) {
+      setFormError("需求最多 400 个字，请精简后再发。");
       return;
     }
 
     setIsPromptTrayOpen(false);
     setFormError(null);
     setIsSubmitting(true);
+    setStatusAnnouncement("正在按条件筛选店铺");
 
     const loadingId = `loading-${Date.now()}`;
+    const history = conversation
+      .filter((item) => item.id !== "intro" && item.type !== "streaming" && item.content.trim())
+      .slice(-6)
+      .map((item) => ({ role: item.role, content: item.content.slice(0, 600), selectedCafeIds: item.selectedCafeIds }));
     setConversation((current) => [
       ...current,
       { id: `user-${Date.now()}`, role: "user", type: "text", content: payload },
@@ -363,13 +430,25 @@ export function CampusCoffeeApp({
     ]);
     setQuery("");
 
+    let localFallback = "";
+    let selectedCafeIds: string[] = [];
+    let streamedText = "";
+    let doneSeen = false;
+    let streamDamaged = false;
+
     try {
       const response = await fetch("/api/recommend", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ query: payload }),
+        body: JSON.stringify({
+          query: payload,
+          history,
+          location: userCoordinate
+            ? { ...userCoordinate, distances: walkingDistances }
+            : undefined,
+        }),
       });
 
       if (!response.ok) {
@@ -377,81 +456,99 @@ export function CampusCoffeeApp({
       }
 
       if (!response.body) {
-        throw new Error("模型没有返回可显示内容。");
+        throw new Error("推荐服务没有返回可读取的数据。");
       }
 
       const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let streamedText = "";
-      let headerParsed = false;
-      let lineBuffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          streamedText += lineBuffer + decoder.decode();
-          break;
+      const parser = new SseParser((event) => {
+        if (event.event === "phase") {
+          const data = safeParseEventData<{ message?: string }>(event.data);
+          if (data?.message) setStatusAnnouncement(data.message);
+          else streamDamaged = true;
+          return;
         }
-
-        const rawChunk = lineBuffer + decoder.decode(value, { stream: true });
-        lineBuffer = "";
-
-        if (!headerParsed) {
-          const newlineIdx = rawChunk.indexOf("\n");
-          if (newlineIdx !== -1) {
-            const headerLine = rawChunk.slice(0, newlineIdx);
-            streamedText = rawChunk.slice(newlineIdx + 1);
-            headerParsed = true;
-
-            try {
-              const meta = JSON.parse(headerLine) as { cards?: { id: string; fitReason: string }[] };
-              if (meta.cards?.length) {
-                const cards = meta.cards;
-                setCardMeta((prev) => ({ ...prev, [loadingId]: cards }));
-              }
-            } catch {
-              // 首行不是合法 JSON，整体当纯文本处理
-              streamedText = rawChunk;
-            }
-          } else {
-            // 还没收到换行符，继续缓冲
-            lineBuffer = rawChunk;
-            if (lineBuffer.length > 600) {
-              // 首行长到不可能是 JSON 头行，整体当文本处理
-              streamedText = lineBuffer;
-              lineBuffer = "";
-              headerParsed = true;
-            }
-            continue;
+        if (event.event === "recommendations") {
+          const data = safeParseEventData<RecommendationEvent>(event.data);
+          if (!data || !Array.isArray(data.selectedCafeIds) || typeof data.localText !== "string" || !Array.isArray(data.picks)) {
+            streamDamaged = true;
+            return;
           }
-        } else {
-          streamedText += rawChunk;
+          localFallback = data.localText.trim();
+          selectedCafeIds = data.selectedCafeIds;
+          const cards = data.picks.map((pick) => ({
+            id: pick.cafe.id,
+            fitReason: pick.fitReasons[0] ?? pick.cafe.summary,
+          }));
+          setCardMeta((current) => ({ ...current, [loadingId]: cards }));
+          setConversation((current) =>
+            current.map((item) =>
+              item.id === loadingId
+                ? { ...item, type: "streaming", content: localFallback, selectedCafeIds }
+                : item,
+            ),
+          );
+          return;
         }
+        if (event.event === "token") {
+          const data = safeParseEventData<{ text?: string }>(event.data);
+          if (typeof data?.text !== "string") {
+            streamDamaged = true;
+            return;
+          }
+          streamedText += data.text;
+          setConversation((current) =>
+            current.map((item) =>
+              item.id === loadingId
+                ? { ...item, type: "streaming", content: streamedText, selectedCafeIds }
+                : item,
+            ),
+          );
+          return;
+        }
+        if (event.event === "error") {
+          const data = safeParseEventData<{ error?: { message?: string } }>(event.data);
+          setStatusAnnouncement(data?.error?.message ?? "已切换到本地完整推荐");
+          return;
+        }
+        if (event.event === "done") {
+          const data = safeParseEventData<{ selectedCafeIds?: string[]; degraded?: boolean }>(event.data);
+          doneSeen = Boolean(data?.selectedCafeIds && data.selectedCafeIds.join("|") === selectedCafeIds.join("|"));
+          setStatusAnnouncement(data?.degraded ? "推荐完成，已使用本地降级" : "推荐完成");
+        }
+      });
 
-        setConversation((current) =>
-          current.map((item) =>
-            item.id === loadingId
-              ? { ...item, type: "streaming", content: streamedText }
-              : item,
-          ),
-        );
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          parser.feed(value);
+        }
+        parser.end();
+      } catch {
+        streamDamaged = true;
+      } finally {
+        reader.releaseLock();
       }
 
-      const finalContent = streamedText.trim() || "这次没有生成可显示内容。";
+      if (!localFallback) throw new Error("推荐流缺少本地结果，请重新发送一次。");
+      const finalContent = doneSeen && !streamDamaged && streamedText.trim() ? streamedText.trim() : localFallback;
       startTransition(() => {
         setConversation((current) =>
           current.map((item) =>
             item.id === loadingId
-              ? { ...item, type: "text", content: finalContent }
+              ? { ...item, type: "text", content: finalContent, selectedCafeIds }
               : item,
           ),
         );
       });
+      if (!doneSeen || streamDamaged) setStatusAnnouncement("连接提前结束，已恢复完整本地推荐");
     } catch (error) {
       setConversation((current) =>
         current.map((item) =>
           item.id === loadingId
-            ? {
+            ? localFallback
+              ? { ...item, type: "text", content: localFallback, selectedCafeIds }
+              : {
                 id: `error-${Date.now()}`,
                 role: "assistant",
                 type: "intro",
@@ -460,6 +557,7 @@ export function CampusCoffeeApp({
             : item,
         ),
       );
+      setStatusAnnouncement(localFallback ? "连接中断，已恢复完整本地推荐" : "推荐请求失败");
     } finally {
       setIsSubmitting(false);
     }
@@ -472,6 +570,18 @@ export function CampusCoffeeApp({
     window.requestAnimationFrame(() => {
       window.scrollTo({ top: 0, behavior: "auto" });
     });
+  }
+
+  function handleViewKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight") nextIndex = (index + 1) % viewTabs.length;
+    if (event.key === "ArrowLeft") nextIndex = (index - 1 + viewTabs.length) % viewTabs.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = viewTabs.length - 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    handleViewChange(viewTabs[nextIndex].id);
+    document.getElementById(`${viewTabs[nextIndex].id}-view-tab`)?.focus();
   }
 
   async function fetchWalkingDistances(position: GeolocationPosition) {
@@ -494,9 +604,10 @@ export function CampusCoffeeApp({
       const payload = await readDistancePayload(response);
 
       if (!response.ok) {
-        throw new Error(payload.message || "步行距离暂时不可用，先显示校门距离。");
+        throw new Error(payload.error?.message || payload.message || "步行距离暂时不可用，先显示校门距离。");
       }
 
+      setUserCoordinate({ longitude: position.coords.longitude, latitude: position.coords.latitude });
       setWalkingDistances(payload.distances ?? {});
       setDistanceStatus("ready");
       setDistanceMessage(payload.message ?? "已根据你的位置更新步行距离。");
@@ -534,11 +645,45 @@ export function CampusCoffeeApp({
     );
   }
 
+  function openAmapNavigation(cafe: Cafe) {
+    const longitude = cafe.entranceLongitude ?? cafe.longitude;
+    const latitude = cafe.entranceLatitude ?? cafe.latitude;
+    const url = new URL("https://uri.amap.com/navigation");
+    url.searchParams.set("to", `${longitude},${latitude},${cafe.name}`);
+    url.searchParams.set("mode", "walk");
+    url.searchParams.set("policy", "1");
+    url.searchParams.set("src", "sipailou-coffee-guide");
+    url.searchParams.set("callnative", "1");
+    window.open(url.toString(), "_blank", "noopener,noreferrer");
+  }
+
+  async function copyAddress(cafe: Cafe) {
+    await navigator.clipboard.writeText(cafe.address);
+    setStatusAnnouncement(`已复制 ${cafe.name} 的地址`);
+  }
+
+  async function shareCafe(cafe: Cafe) {
+    const shareData = { title: `${cafe.name}｜四牌楼咖啡指北`, text: cafe.summary, url: `${window.location.origin}/?cafe=${encodeURIComponent(cafe.id)}` };
+    if (navigator.share) {
+      await navigator.share(shareData).catch(() => undefined);
+      return;
+    }
+    await navigator.clipboard.writeText(shareData.url);
+    setStatusAnnouncement("分享链接已复制");
+  }
+
+  function reportCafe(cafe: Cafe) {
+    const title = encodeURIComponent(`[店铺信息有误] ${cafe.name}`);
+    const body = encodeURIComponent(`店铺：${cafe.name}（${cafe.id}）\n发现的问题：\n核验来源：\n核验日期：`);
+    window.open(`https://github.com/t2860270510-maker/sipailou-coffee-guide/issues/new?title=${title}&body=${body}`, "_blank", "noopener,noreferrer");
+  }
+
   return (
-    <main className={`page-shell page-shell-${activeView}`}>
+    <main ref={mainRef} className={`page-shell page-shell-${activeView}`}>
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{statusAnnouncement}</p>
       <nav className="view-switcher" aria-label="页面切换">
         <div className="view-switcher-inner" role="tablist" aria-label="四牌楼咖啡页面">
-          {viewTabs.map((tab) => (
+          {viewTabs.map((tab, index) => (
             <button
               key={tab.id}
               id={`${tab.id}-view-tab`}
@@ -547,7 +692,9 @@ export function CampusCoffeeApp({
               role="tab"
               aria-selected={activeView === tab.id}
               aria-controls={`${tab.id}-view`}
+              tabIndex={activeView === tab.id ? 0 : -1}
               onClick={() => handleViewChange(tab.id)}
+              onKeyDown={(event) => handleViewKeyDown(event, index)}
             >
               <span>{tab.label}</span>
               <span className="sr-only">{tab.description}</span>
@@ -580,6 +727,11 @@ export function CampusCoffeeApp({
                 <span className={`panel-status ${isSubmitting ? "panel-status-busy" : ""}`}>{headerStatus}</span>
                 <p className="status-copy">{isSubmitting ? waitingCopy : "输入一句需求，我会先帮你缩到两家。"}</p>
               </div>
+              {hasConversationStarted ? (
+                <button className="clear-chat-button" type="button" onClick={clearConversation} disabled={isSubmitting}>
+                  清空会话
+                </button>
+              ) : null}
             </div>
 
             <div className="chat-context-strip" aria-label="聊天提示">
@@ -588,7 +740,7 @@ export function CampusCoffeeApp({
               <span>默认只留两家</span>
             </div>
 
-            <div className="chat-log" aria-live="polite" aria-busy={isSubmitting}>
+            <div className="chat-log" aria-busy={isSubmitting} aria-label="对话记录">
               {conversation.map((item) => {
                 const roleLabel = item.role === "user" ? "你" : "向导";
                 const messageContent =
@@ -624,7 +776,7 @@ export function CampusCoffeeApp({
                               key={card.id}
                               className="inline-card"
                               type="button"
-                              onClick={() => setSelectedCafe(cafe)}
+                              onClick={(event) => openCafe(cafe, event.currentTarget)}
                             >
                               <div className="inline-card-image">
                                 <Image
@@ -844,7 +996,13 @@ export function CampusCoffeeApp({
           </div>
         </div>
 
-        <CafeMap cafes={cafes} walkingDistances={walkingDistances} onSelectCafe={setSelectedCafe} />
+        <CafeMap
+          cafes={activeCafes}
+          walkingDistances={walkingDistances}
+          highlightedCafeId={highlightedCafeId}
+          onHighlightCafe={setHighlightedCafeId}
+          onSelectCafe={(cafe) => openCafe(cafe)}
+        />
 
         <div className="guide-layout">
           <aside className="guide-sidebar">
@@ -855,6 +1013,7 @@ export function CampusCoffeeApp({
                   className={`guide-tab ${group.id === activeGuideGroup ? "guide-tab-active" : ""}`}
                   type="button"
                   onClick={() => setActiveGuideGroup(group.id)}
+                  aria-pressed={group.id === activeGuideGroup}
                 >
                   <span>{group.label}</span>
                   <small>{group.kicker}</small>
@@ -874,6 +1033,9 @@ export function CampusCoffeeApp({
               <article
                 key={cafe.id}
                 className="cafe-card"
+                data-highlighted={highlightedCafeId === cafe.id ? "true" : "false"}
+                onMouseEnter={() => setHighlightedCafeId(cafe.id)}
+                onFocusCapture={() => setHighlightedCafeId(cafe.id)}
                 data-reveal
                 style={{ "--reveal-delay": `${index * 90}ms` } as CSSProperties}
               >
@@ -917,7 +1079,7 @@ export function CampusCoffeeApp({
                   <p className="cafe-notes">{cafe.notes}</p>
 
                   <div className="card-actions">
-                    <button className="text-button" type="button" onClick={() => setSelectedCafe(cafe)}>
+                    <button className="text-button" type="button" onClick={(event) => openCafe(cafe, event.currentTarget)}>
                       看这家更细一点
                     </button>
                     {cafe.id === "katherine-starbucks" ? (
@@ -934,9 +1096,9 @@ export function CampusCoffeeApp({
 
       {selectedCafe ? (
         <div className="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="detail-title">
-          <button className="drawer-backdrop" type="button" onClick={() => setSelectedCafe(null)} aria-label="关闭详情" />
+          <button className="drawer-backdrop" type="button" onClick={closeCafe} aria-label="关闭详情" tabIndex={-1} />
           <div className="drawer-panel">
-            <button className="drawer-mobile-close" type="button" onClick={() => setSelectedCafe(null)}>
+            <button ref={drawerCloseRef} className="drawer-mobile-close" type="button" onClick={closeCafe}>
               收起
             </button>
             <div className="drawer-media">
@@ -954,12 +1116,19 @@ export function CampusCoffeeApp({
                   <p className="eyebrow">{selectedCafe.locationText}</p>
                   <h2 id="detail-title">{selectedCafe.name}</h2>
                 </div>
-                <button className="close-button" type="button" onClick={() => setSelectedCafe(null)}>
+                <button className="close-button" type="button" onClick={closeCafe}>
                   收起
                 </button>
               </div>
 
               <p className="drawer-summary">{selectedCafe.summary}</p>
+
+              <div className="drawer-action-row" aria-label="店铺操作">
+                <button type="button" onClick={() => openAmapNavigation(selectedCafe)}>打开高德导航</button>
+                <button type="button" onClick={() => void copyAddress(selectedCafe)}>复制地址</button>
+                <button type="button" onClick={() => void shareCafe(selectedCafe)}>分享</button>
+                <button type="button" onClick={() => reportCafe(selectedCafe)}>信息有误</button>
+              </div>
 
               <dl className="drawer-facts">
                 <div>

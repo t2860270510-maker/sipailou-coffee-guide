@@ -1,232 +1,108 @@
-import assert from "node:assert/strict";
+import { describe, expect, it } from "vitest";
 
 import { cafes } from "../lib/cafes";
-import { extractDeepSeekText, getDeepSeekRuntimeSnapshot } from "../lib/deepseek";
-import { buildCafeContextBlock, buildRecommendationPrompt, DEEPSEEK_SYSTEM_PROMPT } from "../lib/deepseek-prompts";
-import { formatStaticWalk, getCafeDestination } from "../lib/location";
-import { buildLocalRecommendation, getGuideGroupMatches, parseRecommendationQuery } from "../lib/recommendation";
+import { getCafeHoursState } from "../lib/hours";
+import { buildRecommendation, cafeMatchesGroup, parseRecommendationQuery } from "../lib/recommendation";
 
-function run(name: string, assertion: () => void) {
-  try {
-    assertion();
-    console.log(`PASS ${name}`);
-  } catch (error) {
-    console.error(`FAIL ${name}`);
-    throw error;
-  }
-}
+const afternoon = new Date("2026-08-12T06:00:00.000Z"); // 14:00 Asia/Shanghai
 
-run("system prompt explicitly constrains the model to two cafes and plain text output", () => {
-  assert.match(DEEPSEEK_SYSTEM_PROMPT, /只能推荐 2 家/);
-  assert.match(DEEPSEEK_SYSTEM_PROMPT, /不能编造任何/);
-  assert.match(DEEPSEEK_SYSTEM_PROMPT, /直接输出自然中文/);
-});
+const scenarios: Array<[string, [string, string]]> = [
+  ["明早第一节前想顺路带一杯，别太贵", ["standing-room", "cafe-mo"]],
+  ["下午想坐一会写东西，最好安静一点", ["katherine-starbucks", "disc-coffee"]],
+  ["想和朋友碰面聊聊天，离学校近一点", ["disc-coffee", "joymean"]],
+  ["预算低，想喝咖啡", ["standing-room", "cafe-mo"]],
+  ["一定要插座，想写论文", ["katherine-starbucks", "disc-coffee"]],
+  ["南门最近的咖啡", ["standing-room", "cafe-mo"]],
+  ["东门附近聊天", ["disc-coffee", "joymean"]],
+  ["想喝精品手冲", ["joymean", "clip-coffee"]],
+  ["想买了带走", ["standing-room", "cafe-mo"]],
+  ["早八前喝一杯", ["standing-room", "manner"]],
+  ["预算充足想喝特调", ["umber", "joymean"]],
+  ["下午安静办公", ["katherine-starbucks", "disc-coffee"]],
+  ["想久坐", ["katherine-starbucks", "disc-coffee"]],
+  ["赶时间快速买一杯", ["standing-room", "cafe-mo"]],
+  ["和朋友约会有氛围", ["disc-coffee", "joymean"]],
+  ["便宜又近", ["standing-room", "cafe-mo"]],
+  ["东门精品咖啡", ["disc-coffee", "joymean"]],
+  ["南门早上带走", ["standing-room", "cafe-mo"]],
+  ["有插座更好", ["katherine-starbucks", "disc-coffee"]],
+  ["不介意走远想喝好豆子", ["joymean", "clip-coffee"]],
+  ["现在营业吗", ["disc-coffee", "standing-room"]],
+  ["快关门了吗", ["disc-coffee", "standing-room"]],
+  ["Cafe Mo适合吗", ["disc-coffee", "standing-room"]],
+  ["坐一下午写论文", ["katherine-starbucks", "disc-coffee"]],
+  ["低预算聊天", ["disc-coffee", "joymean"]],
+  ["安静但预算低", ["standing-room", "manner"]],
+  ["外带且东门近", ["manner", "standing-room"]],
+  ["学习写作插座", ["katherine-starbucks", "disc-coffee"]],
+];
 
-run("recommendation prompt includes the raw query and all cafe ids", () => {
-  const prompt = buildRecommendationPrompt("下午想写论文，最好安静一点");
-  assert.match(prompt, /下午想写论文/);
-  for (const cafe of cafes) {
-    assert.match(prompt, new RegExp(cafe.id));
-  }
-});
-
-run("cafe context block contains structured facts", () => {
-  const context = buildCafeContextBlock();
-  assert.match(context, /walk=/);
-  assert.match(context, /socket=/);
-  assert.match(context, /items=/);
-});
-
-run("all cafes have map coordinates and image gallery entries", () => {
-  for (const cafe of cafes) {
-    assert.ok(Number.isFinite(cafe.longitude), `${cafe.id} longitude`);
-    assert.ok(Number.isFinite(cafe.latitude), `${cafe.id} latitude`);
-    assert.ok(cafe.imageGallery.length >= 1, `${cafe.id} image gallery`);
-    assert.ok(cafe.imageGallery.every((image) => image.src && image.alt && image.caption), `${cafe.id} image metadata`);
-  }
-});
-
-run("cafe destination prefers entrance coordinates when available", () => {
-  const cafeMo = cafes.find((cafe) => cafe.id === "cafe-mo");
-  assert.ok(cafeMo);
-
-  const destination = getCafeDestination(cafeMo);
-  assert.equal(destination.longitude, cafeMo.entranceLongitude);
-  assert.equal(destination.latitude, cafeMo.entranceLatitude);
-});
-
-run("static walk label keeps the campus reference distance", () => {
-  const standingRoom = cafes.find((cafe) => cafe.id === "standing-room");
-  assert.ok(standingRoom);
-  assert.match(formatStaticWalk(standingRoom), /从南门约 2 分钟 \/ 150m/);
-});
-
-run("study group keeps the strongest long-stay option", () => {
-  const result = getGuideGroupMatches("study");
-  assert.ok(result.some((cafe) => cafe.id === "katherine-starbucks"));
-});
-
-run("specialty group includes umber", () => {
-  const result = getGuideGroupMatches("specialty");
-  assert.ok(result.some((cafe) => cafe.id === "umber"));
-});
-
-run("query parser detects study intent and socket preference", () => {
-  const parsed = parseRecommendationQuery("下午想写论文，最好安静一点，有插座更好");
-  assert.equal(parsed.scene, "study");
-  assert.equal(parsed.socketNeed, "preferred");
-  assert.equal(parsed.quietNeed, "high");
-});
-
-run("recommendation prompt asks for a chat-style reply from the provided cafes", () => {
-  const prompt = buildRecommendationPrompt("想和朋友坐坐聊天，离学校近一点");
-  assert.match(prompt, /流式输出/);
-  assert.match(prompt, /\[Available Cafes\]/);
-});
-
-run("buildLocalRecommendation produces card meta with exactly two picks and fit reasons", () => {
-  const result = buildLocalRecommendation("下午想写论文，最好安静一点");
-
-  assert.ok(Array.isArray(result.topPicks));
-  assert.equal(result.topPicks.length, 2);
-
-  for (const pick of result.topPicks) {
-    assert.ok(pick.cafe.id);
-    assert.ok(Array.isArray(pick.fitReasons));
-    assert.ok(pick.fitReasons.length >= 1);
-    assert.ok(typeof pick.fitReasons[0] === "string");
-    assert.ok(pick.fitReasons[0].length > 0);
-  }
-});
-
-run("buildLocalRecommendation serializes to the expected stream header format", () => {
-  const result = buildLocalRecommendation("赶时间顺路带一杯");
-  const cards = result.topPicks.map((pick) => ({
-    id: pick.cafe.id,
-    fitReason: pick.fitReasons[0] ?? pick.cafe.summary,
-  }));
-
-  const header = JSON.stringify({ cards });
-
-  assert.equal(cards.length, 2);
-  assert.equal(typeof header, "string");
-  assert.ok(header.includes('"cards"'));
-  assert.ok(header.includes(cards[0].id));
-  assert.ok(header.includes(cards[1].id));
-
-  const parsed = JSON.parse(header) as { cards: { id: string; fitReason: string }[] };
-  assert.equal(parsed.cards.length, 2);
-  for (const card of parsed.cards) {
-    assert.ok(card.id);
-    assert.ok(card.fitReason);
-  }
-});
-
-run("buildLocalRecommendation with chat intent picks chat-friendly cafes", () => {
-  const result = buildLocalRecommendation("想和朋友见面聊天，离学校近一点");
-  const ids = result.topPicks.map((p) => p.cafe.id);
-  assert.ok(ids.some((id) => id === "disc-coffee" || id === "joymean" || id === "clip-coffee"),
-    "expected at least one chat-friendly cafe");
-});
-
-run("non-stream fallback only keeps the assistant text blocks", () => {
-  const text = extractDeepSeekText([
-    { type: "thinking", thinking: "先想一下" },
-    { type: "text", text: "先去凯瑟琳星巴克。" },
-    { type: "text", text: "如果嫌远，再看 Disc Coffee。" },
-  ]);
-
-  assert.equal(text, "先去凯瑟琳星巴克。如果嫌远，再看 Disc Coffee。");
-});
-
-function withEnv(overrides: Record<string, string>, assertion: () => void) {
-  const keys = [
-    "DEEPSEEK_API_KEY",
-    "DEEPSEEK_BASE_URL",
-    "DEEPSEEK_MODEL",
-    "DEEPSEEK_FALLBACK_MODELS",
-    "MINIMAX_API_KEY",
-    "MINIMAX_BASE_URL",
-    "MINIMAX_MODEL",
-    "MINIMAX_FALLBACK_MODELS",
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_MODEL",
-  ];
-  const previous = new Map(keys.map((key) => [key, process.env[key]]));
-
-  for (const key of keys) {
-    delete process.env[key];
-  }
-  Object.assign(process.env, overrides);
-
-  try {
-    assertion();
-  } finally {
-    for (const key of keys) {
-      const value = previous.get(key);
-      if (value === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = value;
-      }
-    }
-  }
-}
-
-run("runtime snapshot shows DeepSeek defaults when no model env is configured", () => {
-  withEnv({}, () => {
-    const snapshot = getDeepSeekRuntimeSnapshot();
-
-    assert.equal(snapshot.apiKeyPresent, false);
-    assert.equal(snapshot.baseURL, "https://api.deepseek.com/anthropic");
-    assert.equal(snapshot.primaryModel, "deepseek-v4-flash");
-    assert.deepEqual(snapshot.fallbackModels, []);
+describe("deterministic recommendation regression", () => {
+  it.each(scenarios)("locks Top2 for %s", (query, expected) => {
+    const result = buildRecommendation({ cafes, query, now: afternoon });
+    expect(result.selectedCafeIds).toEqual(expected);
+    expect(result.topPicks).toHaveLength(2);
+    expect(result.topPicks.every((pick) => pick.fitReasons.length > 0)).toBe(true);
+    for (const id of result.selectedCafeIds) expect(result.explanation).toContain(cafes.find((cafe) => cafe.id === id)?.name);
   });
-});
 
-run("DeepSeek environment variables take priority", () => {
-  withEnv(
-    {
-      DEEPSEEK_API_KEY: "deepseek-key",
-      DEEPSEEK_BASE_URL: "https://example.com/deepseek",
-      DEEPSEEK_MODEL: "deepseek-v4-flash",
-      DEEPSEEK_FALLBACK_MODELS: "deepseek-v4-pro",
-      MINIMAX_API_KEY: "minimax-key",
-      MINIMAX_BASE_URL: "https://example.com/minimax",
-      MINIMAX_MODEL: "MiniMax-M2.7",
-    },
-    () => {
-      const snapshot = getDeepSeekRuntimeSnapshot();
+  it("inherits the previous intent when budget is lowered", () => {
+    const history = [
+      { role: "user" as const, content: "下午想坐一会写东西，最好安静一点" },
+      { role: "assistant" as const, content: "上一轮完整推荐" },
+    ];
+    const result = buildRecommendation({ cafes, query: "预算再低一点", history, now: afternoon });
+    expect(result.parsedRequest.scene).toBe("study");
+    expect(result.parsedRequest.quietNeed).toBe("high");
+    expect(result.parsedRequest.budget).toBe("low");
+  });
 
-      assert.equal(snapshot.apiKeyPresent, true);
-      assert.equal(snapshot.apiKeySource, "DEEPSEEK_API_KEY");
-      assert.equal(snapshot.baseURL, "https://example.com/deepseek");
-      assert.equal(snapshot.baseURLSource, "DEEPSEEK_BASE_URL");
-      assert.equal(snapshot.primaryModel, "deepseek-v4-flash");
-      assert.equal(snapshot.primaryModelSource, "DEEPSEEK_MODEL");
-      assert.deepEqual(snapshot.fallbackModels, ["deepseek-v4-pro"]);
-    },
-  );
-});
+  it("lets the latest explicit condition override history", () => {
+    const parsed = parseRecommendationQuery("换成更适合久坐的", [
+      { role: "user", content: "赶时间，买了就走" },
+      { role: "assistant", content: "上一轮完整推荐" },
+    ]);
+    expect(parsed.stayIntent).toBe("long");
+    expect(parsed.scene).toBe("study");
+  });
 
-run("legacy MiniMax environment variables remain compatible", () => {
-  withEnv(
-    {
-      MINIMAX_API_KEY: "minimax-key",
-      MINIMAX_BASE_URL: "https://api.minimaxi.com/anthropic",
-      MINIMAX_MODEL: "MiniMax-M2.5",
-      MINIMAX_FALLBACK_MODELS: "MiniMax-M2.7",
-    },
-    () => {
-      const snapshot = getDeepSeekRuntimeSnapshot();
+  it("does not pad hard-filtered results with ineligible cafes", () => {
+    const onlyNoSockets = cafes.map((cafe) => ({ ...cafe, socketLevel: "none" as const }));
+    const result = buildRecommendation({ cafes: onlyNoSockets, query: "必须有插座", now: afternoon });
+    expect(result.topPicks).toHaveLength(0);
+    expect(result.relaxationAdvice).toContain("必须有插座");
+    expect(result.ranked.every((pick) => pick.hardExclusions.includes("没有可用插座"))).toBe(true);
+  });
 
-      assert.equal(snapshot.apiKeyPresent, true);
-      assert.equal(snapshot.apiKeySource, "MINIMAX_API_KEY");
-      assert.equal(snapshot.baseURLSource, "MINIMAX_BASE_URL");
-      assert.equal(snapshot.primaryModel, "MiniMax-M2.5");
-      assert.equal(snapshot.primaryModelSource, "MINIMAX_MODEL");
-      assert.deepEqual(snapshot.fallbackModels, ["MiniMax-M2.7"]);
-    },
-  );
+  it("excludes inactive cafes before scoring", () => {
+    const modified = cafes.map((cafe) => (cafe.id === "standing-room" ? { ...cafe, status: "inactive" as const } : cafe));
+    const result = buildRecommendation({ cafes: modified, query: "早八便宜带走", now: afternoon });
+    expect(result.selectedCafeIds).not.toContain("standing-room");
+  });
+
+  it("uses live walking distances only as a ranking signal", () => {
+    const result = buildRecommendation({
+      cafes,
+      query: "想和朋友聊天，近一点",
+      now: afternoon,
+      location: {
+        longitude: 118.79,
+        latitude: 32.05,
+        distances: { joymean: { distanceM: 20, durationMin: 1 }, "disc-coffee": { distanceM: 900, durationMin: 14 } },
+      },
+    });
+    expect(result.selectedCafeIds[0]).toBe("joymean");
+  });
+
+  it("computes open and closing-soon states from structured hours", () => {
+    const standing = cafes.find((cafe) => cafe.id === "standing-room")!;
+    expect(getCafeHoursState(standing, afternoon).state).toBe("open");
+    expect(getCafeHoursState(standing, new Date("2026-08-12T07:30:00.000Z")).state).toBe("closing_soon");
+    expect(getCafeHoursState(standing, new Date("2026-08-12T10:00:00.000Z")).state).toBe("closed");
+  });
+
+  it("keeps guide categories available without a map", () => {
+    expect(cafes.filter((cafe) => cafeMatchesGroup(cafe, "study")).map((cafe) => cafe.id)).toContain("katherine-starbucks");
+    expect(cafes.filter((cafe) => cafeMatchesGroup(cafe, "specialty")).map((cafe) => cafe.id)).toContain("umber");
+  });
 });

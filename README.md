@@ -1,55 +1,135 @@
-# 四牌楼咖啡指北
+# 四牌楼咖啡决策 Agent
 
-一个面向四牌楼校区周边学生的场景化咖啡选择网页。首屏是对话式输入，DeepSeek 会在聊天窗口里流式返回 2 家更合适的店；向下滚动是编辑式咖啡指南。
+[![CI](https://github.com/t2860270510-maker/sipailou-coffee-guide/actions/workflows/ci.yml/badge.svg)](https://github.com/t2860270510-maker/sipailou-coffee-guide/actions/workflows/ci.yml)
+[![Vercel](https://img.shields.io/badge/Vercel-线上站点-000?logo=vercel)](https://sipailou-coffee-guide.vercel.app)
 
-## Run
+面向东南大学四牌楼校区周边的咖啡决策工具。它先用本地结构化规则稳定选出最多两家，再由 DeepSeek 解释“为什么选、各有什么取舍”。模型不可用、超时、空回答或输出越界时，页面仍会收到同一组店铺的完整本地推荐。
 
-1. 准备 Node.js 20+。
-2. 安装依赖：`npm install`
-3. 复制环境变量模板：`cp .env.example .env.local`
-4. 在 `.env.local` 中填写你的 `DEEPSEEK_API_KEY`、高德 Web 服务 `AMAP_WEB_KEY`，以及前端地图用的 `NEXT_PUBLIC_AMAP_JS_KEY` / `NEXT_PUBLIC_AMAP_SECURITY_JS_CODE`
-5. 启动开发环境：`npm run dev`
+![390px 移动端对话页](docs/screenshots/mobile-390.png)
 
-## Scripts
+![1280px 桌面店铺页](docs/screenshots/desktop-1280.png)
 
-- `npm run dev`：本地开发
-- `npm run build`：生产构建
-- `npm run preview`：本地用 Cloudflare Workers 运行生产预览
-- `npm run deploy`：构建并部署到 Cloudflare Workers
-- `npm run start`：启动生产环境
-- `npm test`：运行推荐逻辑测试
+## 核心保证
 
-## Deploy
+- 每次最多推荐两家；有硬条件且不足两家时不拿不合格店铺凑数。
+- 正文和卡片共用规则引擎产生的店铺 ID。
+- 支持最近 6 条真实消息，让“预算再低一点”“换成更适合久坐的”继承上一轮。
+- DeepSeek 只能解释已选中的店，不能看见或改选其他店。
+- SSE 协议固定为 `meta → phase → recommendations → sources → phase → token* → error? → done`。
+- CoffeeOverlay v1 让线上店铺数据可保存草稿、严格校验、发布、历史回退；公开问答只读取已发布版本。
+- Private Blob 缺失、损坏或版本不兼容时自动使用 `lib/cafes.ts` 静态基线。
+- 页面不会自动请求定位；地图不可用时，店铺列表仍可完成导航、复制地址、分享和问题反馈。
 
-- Vercel：最推荐，原生支持 Next.js App Router 和 `/api/recommend`。导入仓库或直接部署这个目录后，需要配置 `DEEPSEEK_API_KEY`、`AMAP_WEB_KEY`、`NEXT_PUBLIC_AMAP_JS_KEY` 和 `NEXT_PUBLIC_AMAP_SECURITY_JS_CODE`。
-- Netlify：支持，但更适合“导入仓库并构建”，不建议只靠手动拖文件夹做静态托管，因为这个项目包含服务端 API 路由。
-- Cloudflare：支持，使用 OpenNext 适配器部署到 Workers。这个项目不是静态导出站点，应该按 Worker/OpenNext 方式部署。
-- Node 版本固定为 `20.x`，项目根目录有 [`.nvmrc`](/Users/tht/Documents/New project/.nvmrc) 和 `package.json` 的 `engines` 配置。
-- 如果使用 Netlify，请在站点设置里添加 `DEEPSEEK_API_KEY`、`AMAP_WEB_KEY`、`NEXT_PUBLIC_AMAP_JS_KEY` 和 `NEXT_PUBLIC_AMAP_SECURITY_JS_CODE`，并保留根目录的 [`netlify.toml`](/Users/tht/Documents/New project/netlify.toml)。
-- 如果使用 Vercel，请在项目环境变量里添加 `DEEPSEEK_API_KEY`、`AMAP_WEB_KEY`、`NEXT_PUBLIC_AMAP_JS_KEY` 和 `NEXT_PUBLIC_AMAP_SECURITY_JS_CODE`。默认会连 DeepSeek Anthropic 兼容接口 `https://api.deepseek.com/anthropic`，模型为 `deepseek-v4-flash`。
-- 如果使用 Cloudflare，请在仓库保持 [`next.config.mjs`](/Users/tht/Documents/New project/next.config.mjs)、[`open-next.config.ts`](/Users/tht/Documents/New project/open-next.config.ts) 和 [`wrangler.jsonc`](/Users/tht/Documents/New project/wrangler.jsonc) 这 3 个文件，并在项目环境变量里添加 `DEEPSEEK_API_KEY`、`AMAP_WEB_KEY`、`NEXT_PUBLIC_AMAP_JS_KEY` 和 `NEXT_PUBLIC_AMAP_SECURITY_JS_CODE`。
+## 架构
 
-## Cloudflare
+```mermaid
+flowchart LR
+  U[用户查询 + 最近 6 条消息] --> R[确定性规则引擎]
+  D[已发布 CoffeeDataSnapshot] --> R
+  R -->|固定店铺 ID / 分数 / 原因| C[完整本地正文 + 推荐卡片]
+  R -->|仅入选店事实| M[DeepSeek 解释]
+  M --> V[店名 / ID / 数字 / 事实校验]
+  V -->|通过| S[SSE 输出]
+  V -->|失败、超时或空回答| C
+  C --> S
+  B[Private Blob 发布版本] --> D
+  F[静态 cafes.ts] -->|Blob 降级| D
+```
 
-1. 在 Cloudflare 中连接这个 GitHub 仓库。
-2. 不要再使用 `npx wrangler deploy` 作为 Git 部署命令。
-3. 将部署命令设置为 `npm run deploy`。
-4. 如果界面要求单独填写构建命令，也使用 `npm run deploy`，让 OpenNext 统一负责构建和部署。
-5. 在 Cloudflare 项目环境变量中添加 `DEEPSEEK_API_KEY`、`AMAP_WEB_KEY`、`NEXT_PUBLIC_AMAP_JS_KEY` 和 `NEXT_PUBLIC_AMAP_SECURITY_JS_CODE`；如需覆盖默认模型，也可一并设置 `DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`、`DEEPSEEK_FALLBACK_MODELS`。
-6. 本地预览时可复制 [`.dev.vars.example`](/Users/tht/Documents/New project/.dev.vars.example) 为 `.dev.vars`，再运行 `npm run preview`。
+主要模块：
 
-Cloudflare 部署的关键点：
+- `lib/recommendation.ts`：纯函数规则、历史意图合并、硬排除、Top2 和本地正文。
+- `lib/deepseek.ts`：OpenAI 兼容接口、12 秒流超时、6 秒非流式补救和事实校验。
+- `lib/sse.ts`：支持任意网络分片、UTF-8 跨分片、CRLF/LF、多行 data、BOM 和 EOF 尾事件。
+- `lib/data/`：CoffeeOverlay schema、Private Blob 适配、60 秒公开快照、发布和回退事务。
+- `app/admin`：单口令管理台；草稿试聊不会影响公开数据。
+- `app/api/health`：无敏感信息的运行状态。
 
-- 这是 Next.js App Router + Worker/OpenNext 项目，不要改成静态导出。
-- `lib/deepseek.ts` 使用的 `node:crypto` 由 `wrangler.jsonc` 中的 `nodejs_compat` 提供兼容。
-- `public/_headers` 已为 `/_next/static/*` 配置长期缓存头。
+## 本地运行
 
-## Notes
+需要 Node.js 24。
 
-- 前端不会直接暴露模型 API key，模型请求统一走 `/api/recommend`。
-- 高德 Web 服务 key 只在服务端 `/api/distances` 中使用，用于根据当前位置计算步行距离。
-- 店铺展示页的小地图使用高德 Web端(JS API) key：`NEXT_PUBLIC_AMAP_JS_KEY` 会随前端包公开，建议在高德开放平台为该 key 配置域名白名单，并同时配置 `NEXT_PUBLIC_AMAP_SECURITY_JS_CODE`。
-- 当前接入的是“API 调模型直接流式生成聊天回复”的链路，默认使用 DeepSeek Anthropic 兼容接口和 `deepseek-v4-flash`。
-- 如果 DeepSeek 临时超时、返回格式不稳定或没有配置 API Key，接口会直接返回错误提示，不再回退到本地推荐逻辑。
-- 提示词与模型润色逻辑定义在 `lib/deepseek-prompts.ts` 和 `lib/deepseek.ts`。
-- 旧的 `MINIMAX_*` / `ANTHROPIC_*` 环境变量仍可作为兼容回退使用；新配置建议统一使用 `DEEPSEEK_*`。
+```bash
+npm ci
+cp .env.example .env.local
+npm run dev
+```
+
+常用检查：
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npm run test:e2e
+```
+
+## 环境变量
+
+| 变量 | 范围 | 必需 | 说明 |
+| --- | --- | --- | --- |
+| `DEEPSEEK_API_KEY` | 服务端 | 否 | 未配置时始终使用完整本地推荐 |
+| `DEEPSEEK_BASE_URL` | 服务端 | 否 | 默认 `https://api.deepseek.com` |
+| `DEEPSEEK_MODEL` | 服务端 | 否 | 默认 `deepseek-v4-flash` |
+| `AMAP_WEB_KEY` | 服务端 | 否 | 批量步行距离；缺失时使用校门距离 |
+| `NEXT_PUBLIC_AMAP_JS_KEY` | 浏览器 | 否 | 高德地图 JS API，必须配置域名白名单 |
+| `NEXT_PUBLIC_AMAP_SECURITY_JS_CODE` | 浏览器 | 否 | 高德 JS API 安全密钥 |
+| `COFFEE_DATA_BLOB_READ_WRITE_TOKEN` | 服务端 | Phase 2 必需 | 独立 Private Blob：草稿与发布版本 |
+| `COFFEE_DATA_BLOB_STORE_ID` | 服务端 | Vercel 推荐 | Private Blob Store ID；使用 Vercel OIDC 时可替代数据 Blob Token |
+| `COFFEE_MEDIA_BLOB_READ_WRITE_TOKEN` | 服务端 | 上传图片必需 | 独立 Public Blob：清理元数据后的 WebP |
+| `COFFEE_MEDIA_BLOB_STORE_ID` | 服务端 | Vercel 推荐 | Public Blob Store ID；使用 Vercel OIDC 时可替代媒体 Blob Token |
+| `ADMIN_ACCESS_TOKEN` | 服务端 | 管理台必需 | 单一管理口令，同时作为签名密钥；轮换会使旧 Cookie 失效 |
+| `APP_ORIGIN` | 服务端 | 生产建议 | 管理写接口允许的站点 Origin |
+
+数据与媒体 Blob 必须使用两个独立 Store；在 Vercel 上优先配置 Store ID 并使用平台 OIDC，其他运行环境可以配置各自的读写 Token。不要把任何服务端 Key 写入 `NEXT_PUBLIC_*`。高德前端 Key 本来就会公开，必须在高德开放平台只允许生产域名和 Vercel Preview 所需域名。
+
+## 数据维护、发布与回退
+
+1. 打开 `/admin`，输入管理口令和核验人姓名。
+2. 修改结构化字段、营业时间、坐标、图片和来源。每项事实变更需要对应 `fieldEvidence`。
+3. 保存草稿。草稿不会影响公开页面。
+4. 用“草稿试聊”验证规则和文案；未保存的浏览器草稿也只用于这次试聊。
+5. 查看发布差异并运行严格校验。
+6. 发布时先写入不可变 `coffee-data/releases/<timestamp>-<uuid>.json`，再用 ETag 更新 `coffee-data/published.json`。
+7. 回退会复制目标内容生成一条新的 rollback release，不会覆盖历史文件，并把目标内容同步成当前草稿。
+
+Blob 布局：
+
+```text
+coffee-data/draft.json
+coffee-data/published.json
+coffee-data/releases/<timestamp>-<uuid>.json
+coffee-media/<cafeId>/<timestamp>-<uuid>.webp
+```
+
+静态店恢复基线就是删除对应 patch。未发布新增店可删除；只要出现在任一发布版本中，就只能改为 `inactive`、`temporarily_closed` 或 `permanently_closed`。
+
+## 部署检查清单（Vercel）
+
+- Production 与 Preview 都使用 Node 24。
+- Production/Preview 分别连接独立的数据 Private Blob、媒体 Public Blob 和 `ADMIN_ACCESS_TOKEN`。
+- Preview 同样配置 `AMAP_WEB_KEY`；高德前端 Key 设置正确域名白名单。
+- Vercel Firewall 为 `/api/recommend` 配置每 IP 20 次/60 秒固定窗口；应用内还限制每 IP 同时 2 个、单实例模型请求同时 12 个。
+- `GET /api/health` 显示正确的数据版本、有效店铺数和降级状态。
+- GitHub Actions 的 Linux、Windows、macOS 与 Chromium 任务全部通过。
+- Preview 验证后再提升到 Production；生产发布后运行本地降级推荐和 13 条验收场景。
+
+项目只维护 Vercel 部署链路；旧 Netlify、Cloudflare/OpenNext/Wrangler 配置已移除。
+
+## 故障排查
+
+- 正文或模型异常：查看 `/api/health` 的模型配置；无论原因如何，公开推荐都应显示本地完整正文和一致卡片。
+- Blob 故障：健康接口会显示 `source: static`、`degraded: true` 和兼容警告；修复 Blob 后最多 60 秒恢复。
+- 发布冲突：刷新管理台，重新核对差异后发布；系统不会覆盖其他管理员的新版本。
+- 地图空白：确认高德 JS Key、Security Code、域名白名单和 CSP；列表功能不依赖地图。
+- 距离失败：确认服务端 `AMAP_WEB_KEY`。定位失败只影响排序信号，不影响店铺浏览。
+- 管理会话失效：重新登录；口令轮换会主动使旧签名 Cookie 无效。
+
+结构化日志只记录耗时、模型结果、降级原因、接口错误和定位成功率，不记录查询正文、IP 或坐标。
+
+## 许可
+
+- 代码：MIT，见 [LICENSE](LICENSE)。
+- 原创文字与原创图片：CC BY-NC 4.0，见 [CONTENT_LICENSE.md](CONTENT_LICENSE.md)。
+- 第三方媒体按各自来源和权利说明使用，不因本仓库许可而重新授权。

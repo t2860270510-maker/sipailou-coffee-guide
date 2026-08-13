@@ -3,32 +3,40 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "start": "next start",
-    "test": "tsx ./tests/recommendation.test.ts"
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run --exclude tests/e2e/**",
+    "test:e2e": "playwright test",
+    "test:recommendation": "vitest run tests/recommendation.test.ts",
+    "test:stream": "vitest run tests/sse.test.ts"
   },
   "dependencies": {
     "@amap/amap-jsapi-loader": "^1.0.1",
-    "@anthropic-ai/sdk": "^0.82.0",
-    "next": "^16.2.2",
+    "@vercel/blob": "2.8.0",
+    "next": "16.3.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "sharp": "0.35.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@netlify/plugin-nextjs": "^5.15.9",
-    "@opennextjs/cloudflare": "^1.19.1",
+    "@axe-core/playwright": "^4.10.2",
+    "@playwright/test": "^1.55.0",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.1",
+    "eslint-config-next": "16.3.0",
+    "postcss": "8.5.26",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",
-    "wrangler": "^4.83.0"
+    "vitest": "^3.2.4"
   }
 }

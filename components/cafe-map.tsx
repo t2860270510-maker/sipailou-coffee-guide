@@ -13,6 +13,8 @@ import type { Cafe } from "../lib/types";
 type CafeMapProps = {
   cafes: Cafe[];
   walkingDistances: WalkingDistanceMap;
+  highlightedCafeId: string | null;
+  onHighlightCafe: (cafeId: string) => void;
   onSelectCafe: (cafe: Cafe) => void;
 };
 
@@ -77,9 +79,9 @@ function getWalkLabel(cafe: Cafe, walkingDistances: WalkingDistanceMap) {
   return liveDistance ? formatWalkingDistance(liveDistance) : formatStaticWalk(cafe);
 }
 
-function createMarkerContent(cafe: Cafe, index: number) {
+function createMarkerContent(cafe: Cafe, index: number, highlighted: boolean) {
   const marker = document.createElement("div");
-  marker.className = "map-marker";
+  marker.className = `map-marker${highlighted ? " map-marker-active" : ""}`;
   marker.setAttribute("aria-label", cafe.name);
 
   const number = document.createElement("span");
@@ -136,11 +138,21 @@ function createInfoWindowContent({
   return shell;
 }
 
-export function CafeMap({ cafes, walkingDistances, onSelectCafe }: CafeMapProps) {
+export function CafeMap({ cafes, walkingDistances, highlightedCafeId, onHighlightCafe, onSelectCafe }: CafeMapProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const markerElementsRef = useRef(new Map<string, HTMLElement>());
+  const walkingDistancesRef = useRef(walkingDistances);
+  const onHighlightCafeRef = useRef(onHighlightCafe);
+  const onSelectCafeRef = useRef(onSelectCafe);
   const [mapState, setMapState] = useState<MapState>(() =>
     process.env.NEXT_PUBLIC_AMAP_JS_KEY ? "loading" : "missing-key",
   );
+
+  useEffect(() => {
+    walkingDistancesRef.current = walkingDistances;
+    onHighlightCafeRef.current = onHighlightCafe;
+    onSelectCafeRef.current = onSelectCafe;
+  }, [onHighlightCafe, onSelectCafe, walkingDistances]);
 
   useEffect(() => {
     const container = mapContainerRef.current;
@@ -162,7 +174,7 @@ export function CafeMap({ cafes, walkingDistances, onSelectCafe }: CafeMapProps)
 
     let map: AMapMap | null = null;
     let cancelled = false;
-    const markerElements = new Map<string, HTMLElement>();
+    const markerElements = markerElementsRef.current;
 
     async function loadMap() {
       setMapState("loading");
@@ -207,7 +219,7 @@ export function CafeMap({ cafes, walkingDistances, onSelectCafe }: CafeMapProps)
 
         const markers = cafes.map((cafe, index) => {
           const position = getCafePosition(cafe);
-          const content = createMarkerContent(cafe, index);
+          const content = createMarkerContent(cafe, index, false);
           markerElements.set(cafe.id, content);
 
           const marker = new AMap.Marker({
@@ -221,9 +233,11 @@ export function CafeMap({ cafes, walkingDistances, onSelectCafe }: CafeMapProps)
             markerElements.forEach((element) => element.classList.remove("map-marker-active"));
             content.classList.add("map-marker-active");
             marker.setzIndex?.(500);
-            infoWindow.setContent(createInfoWindowContent({ cafe, walkingDistances, onSelectCafe }));
+            onHighlightCafeRef.current(cafe.id);
+            infoWindow.setContent(createInfoWindowContent({ cafe, walkingDistances: walkingDistancesRef.current, onSelectCafe: onSelectCafeRef.current }));
             infoWindow.open(map as AMapMap, position);
           });
+          marker.on("mouseover", () => onHighlightCafeRef.current(cafe.id));
 
           return marker;
         });
@@ -246,7 +260,13 @@ export function CafeMap({ cafes, walkingDistances, onSelectCafe }: CafeMapProps)
       map?.destroy();
       map = null;
     };
-  }, [cafes, onSelectCafe, walkingDistances]);
+  }, [cafes]);
+
+  useEffect(() => {
+    markerElementsRef.current.forEach((element, cafeId) => {
+      element.classList.toggle("map-marker-active", cafeId === highlightedCafeId);
+    });
+  }, [highlightedCafeId]);
 
   const showFallback = mapState === "missing-key" || mapState === "error";
 

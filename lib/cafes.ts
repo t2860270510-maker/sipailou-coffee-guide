@@ -1,6 +1,6 @@
-import type { Cafe, EditorialMoment, GuideGroup } from "./types";
+import type { Cafe, DayKey, EditorialMoment, GuideGroup, HoursInterval } from "./types";
 
-export const cafes: Cafe[] = [
+const baselineCafes = [
   {
     id: "standing-room",
     name: "STANDING ROOM",
@@ -293,6 +293,101 @@ export const cafes: Cafe[] = [
     ],
   },
 ];
+
+const weekdays: DayKey[] = ["monday", "tuesday", "wednesday", "thursday", "friday"];
+const weekends: DayKey[] = ["saturday", "sunday"];
+
+function parseHours(value: string): HoursInterval[] {
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const [open, close] = part.split("-");
+      return { open, close };
+    });
+}
+
+function aliasesFor(id: string, name: string) {
+  const aliases: Record<string, string[]> = {
+    "standing-room": ["Standing Room", "standing", "站立空间"],
+    "cafe-mo": ["Cafe Mo", "Mo"],
+    joymean: ["Joymean", "Joymean Coffee"],
+    manner: ["Manner", "文学客厅 Manner"],
+    "disc-coffee": ["Disc", "Disc Coffee"],
+    umber: ["umber", "安珀咖啡"],
+    "clip-coffee": ["clip", "clip coffee"],
+    "katherine-starbucks": ["星巴克", "凯瑟琳星巴克", "Starbucks"],
+  };
+  return Array.from(new Set([name, ...(aliases[id] ?? [])]));
+}
+
+function priceRangeFor(level: Cafe["priceLevel"]) {
+  if (level === "low") return { min: 10, max: 25, currency: "CNY" as const };
+  if (level === "high") return { min: 25, max: 55, currency: "CNY" as const };
+  return { min: 18, max: 40, currency: "CNY" as const };
+}
+
+/**
+ * 只读静态基线。线上修订必须通过 CoffeeOverlay 叠加，不直接改写这组观察数据。
+ */
+export const cafes: Cafe[] = baselineCafes.map((cafe) => {
+  const weekly = {} as Cafe["structuredHours"]["weekly"];
+  for (const day of weekdays) weekly[day] = parseHours(cafe.weekdayHours);
+  for (const day of weekends) weekly[day] = parseHours(cafe.weekendHours);
+
+  const evidence = {
+    sourceLabel: cafe.sourceNote,
+    verifiedAt: cafe.verifiedAt,
+    verifiedBy: "四牌楼咖啡指北编辑",
+  };
+
+  return {
+    ...cafe,
+    earlyFriendly: cafe.earlyFriendly as Cafe["earlyFriendly"],
+    priceLevel: cafe.priceLevel as Cafe["priceLevel"],
+    socketLevel: cafe.socketLevel as Cafe["socketLevel"],
+    mainScene: cafe.mainScene as Cafe["mainScene"],
+    aliases: aliasesFor(cafe.id, cafe.name),
+    status: "active",
+    address: cafe.amapAddress ?? cafe.locationText,
+    structuredHours: { timezone: "Asia/Shanghai", weekly, exceptions: [] },
+    priceRange: priceRangeFor(cafe.priceLevel as Cafe["priceLevel"]),
+    quietByPeriod: { morning: cafe.quietScore, afternoon: cafe.quietScore },
+    seatLevel:
+      cafe.id === "katherine-starbucks"
+        ? "spacious"
+        : cafe.mainScene === "quick_coffee"
+          ? "limited"
+          : "adequate",
+    wifi: cafe.id === "katherine-starbucks" ? "yes" : "unknown",
+    restroom: cafe.id === "katherine-starbucks" ? "yes" : "unknown",
+    takeout: "yes",
+    stayIntent: cafe.mainScene === "study" ? "long" : cafe.mainScene === "quick_coffee" ? "short" : "any",
+    dietaryOptions: [],
+    sourceLabel: cafe.sourceNote,
+    verifiedBy: "四牌楼咖啡指北编辑",
+    fieldEvidence: {
+      hours: evidence,
+      price: evidence,
+      location: {
+        ...evidence,
+        verifiedAt: cafe.poiVerifiedAt ?? cafe.verifiedAt,
+        note: "高德 POI 与入口位置复核",
+      },
+      experience: evidence,
+      menu: evidence,
+      images: evidence,
+    },
+    imageGallery: cafe.imageGallery.map((image) => ({
+      ...image,
+      sourceLabel: cafe.sourceNote,
+      rights: "原创示意图，CC BY-NC 4.0",
+      verifiedAt: cafe.verifiedAt,
+      verifiedBy: "四牌楼咖啡指北编辑",
+    })),
+  } satisfies Cafe;
+});
 
 export const guideGroups: GuideGroup[] = [
   {

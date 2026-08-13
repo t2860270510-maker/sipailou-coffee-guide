@@ -1,13 +1,17 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { cafes } from "../../../lib/cafes";
+import { getPublicCoffeeSnapshot } from "../../../lib/data/service";
 import { getCafeDestination, type WalkingDistanceMap } from "../../../lib/location";
+import type { Cafe } from "../../../lib/types";
+import { recordMetric } from "../../../lib/metrics";
+
+export const runtime = "nodejs";
 
 const AMAP_BASE_URL = "https://restapi.amap.com";
-const DISTANCE_CACHE_TTL_MS = 5 * 60 * 1000;
-const AMAP_REQUEST_TIMEOUT_MS = 5000;
-const AMAP_REQUEST_SPACING_MS = 450;
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 5_000;
 
 const requestSchema = z.object({
   longitude: z.number().min(-180).max(180),
@@ -15,229 +19,132 @@ const requestSchema = z.object({
   coordinateSystem: z.enum(["gps", "amap"]).optional().default("gps"),
 });
 
-type AmapBaseResponse = {
-  status?: string;
-  info?: string;
-  infocode?: string;
-};
+type AmapResponse = { status?: string; locations?: string; route?: { paths?: Array<{ distance?: string; duration?: string }> } };
+type DistanceResult = { distances: WalkingDistanceMap; failedCafeIds: string[] };
+type CacheEntry = DistanceResult & { expiresAt: number };
 
-type AmapWalkingResponse = AmapBaseResponse & {
-  route?: {
-    paths?: Array<{
-      distance?: string;
-      duration?: string;
-    }>;
-  };
-};
+const cache = new Map<string, CacheEntry>();
+const inFlight = new Map<string, Promise<DistanceResult>>();
 
-type AmapCoordinateConvertResponse = AmapBaseResponse & {
-  locations?: string;
-};
-
-type DistanceCacheEntry = {
-  expiresAt: number;
-  distances: WalkingDistanceMap;
-  failedCafeIds: string[];
-};
-
-const distanceCache = new Map<string, DistanceCacheEntry>();
-
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => {
-    setTimeout(resolve, ms);
-  });
+function apiError(status: number, code: string, message: string, requestId: string) {
+  const response = NextResponse.json({ error: { code, message, requestId } }, { status });
+  response.headers.set("Cache-Control", "no-store");
+  return response;
 }
 
-function buildAmapUrl(path: string, apiKey: string, params: Record<string, string>) {
-  const url = new URL(`${AMAP_BASE_URL}${path}`);
-  url.searchParams.set("key", apiKey);
+function bucketKey(dataVersion: string, longitude: number, latitude: number) {
+  return `${dataVersion}:${longitude.toFixed(4)},${latitude.toFixed(4)}`;
+}
+
+function amapUrl(path: string, key: string, params: Record<string, string>) {
+  const url = new URL(path, AMAP_BASE_URL);
+  url.searchParams.set("key", key);
   url.searchParams.set("output", "JSON");
-
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, value);
-  }
-
+  for (const [name, value] of Object.entries(params)) url.searchParams.set(name, value);
   return url;
 }
 
-async function fetchAmapJson<T extends AmapBaseResponse>(url: URL) {
+async function amapFetch(url: URL) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), AMAP_REQUEST_TIMEOUT_MS);
-
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { signal: controller.signal });
-    const payload = (await response.json().catch(() => ({}))) as T;
-
-    if (!response.ok || payload.status !== "1") {
-      throw new Error(payload.infocode || payload.info || "amap_request_failed");
-    }
-
+    const response = await fetch(url, { signal: controller.signal, cache: "no-store" });
+    const payload = (await response.json().catch(() => null)) as AmapResponse | null;
+    if (!response.ok || payload?.status !== "1") throw new Error("amap_unavailable");
     return payload;
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timer);
   }
 }
 
-function parseConvertedCoordinate(locations: string | undefined) {
-  const firstLocation = locations?.split(";")[0];
-  const [longitude, latitude] = firstLocation?.split(",").map(Number) ?? [];
-
-  if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
-    return null;
-  }
-
-  return { longitude, latitude };
+async function convertCoordinate(key: string, longitude: number, latitude: number, system: "gps" | "amap") {
+  if (system === "amap") return { longitude, latitude };
+  const payload = await amapFetch(
+    amapUrl("/v3/assistant/coordinate/convert", key, { locations: `${longitude},${latitude}`, coordsys: "gps" }),
+  );
+  const [convertedLongitude, convertedLatitude] = (payload.locations?.split(";")[0] ?? "").split(",").map(Number);
+  return Number.isFinite(convertedLongitude) && Number.isFinite(convertedLatitude)
+    ? { longitude: convertedLongitude, latitude: convertedLatitude }
+    : { longitude, latitude };
 }
 
-async function toAmapCoordinate({
-  apiKey,
-  longitude,
-  latitude,
-  coordinateSystem,
-}: {
-  apiKey: string;
-  longitude: number;
-  latitude: number;
-  coordinateSystem: "gps" | "amap";
-}) {
-  if (coordinateSystem === "amap") {
-    return { longitude, latitude };
-  }
+async function oneDistance(key: string, origin: { longitude: number; latitude: number }, cafe: Cafe) {
+  const destination = getCafeDestination(cafe);
+  const payload = await amapFetch(
+    amapUrl("/v3/direction/walking", key, {
+      origin: `${origin.longitude},${origin.latitude}`,
+      destination: `${destination.longitude},${destination.latitude}`,
+    }),
+  );
+  const path = payload.route?.paths?.[0];
+  const distanceM = Number(path?.distance);
+  const durationSeconds = Number(path?.duration);
+  if (!Number.isFinite(distanceM) || !Number.isFinite(durationSeconds)) throw new Error("amap_empty_route");
+  return { distanceM: Math.round(distanceM), durationMin: Math.max(1, Math.ceil(durationSeconds / 60)), source: "amap_walking" as const };
+}
 
-  const url = buildAmapUrl("/v3/assistant/coordinate/convert", apiKey, {
-    locations: `${longitude},${latitude}`,
-    coordsys: "gps",
+async function withConcurrency<T, R>(items: T[], limit: number, task: (item: T) => Promise<R>) {
+  const results = new Array<PromiseSettledResult<R>>(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor++;
+      try {
+        results[index] = { status: "fulfilled", value: await task(items[index]) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+async function calculate(key: string, origin: { longitude: number; latitude: number }, activeCafes: Cafe[]) {
+  const settled = await withConcurrency(activeCafes, 4, (cafe) => oneDistance(key, origin, cafe));
+  const distances: WalkingDistanceMap = {};
+  const failedCafeIds: string[] = [];
+  settled.forEach((result, index) => {
+    const cafeId = activeCafes[index].id;
+    if (result.status === "fulfilled") distances[cafeId] = result.value;
+    else failedCafeIds.push(cafeId);
   });
-
-  const payload = await fetchAmapJson<AmapCoordinateConvertResponse>(url);
-  return parseConvertedCoordinate(payload.locations) ?? { longitude, latitude };
-}
-
-function cacheKeyFor(longitude: number, latitude: number) {
-  return `${longitude.toFixed(5)},${latitude.toFixed(5)}`;
-}
-
-function getCachedDistances(longitude: number, latitude: number) {
-  const cacheKey = cacheKeyFor(longitude, latitude);
-  const cached = distanceCache.get(cacheKey);
-
-  if (!cached || cached.expiresAt < Date.now()) {
-    distanceCache.delete(cacheKey);
-    return null;
-  }
-
-  return cached;
-}
-
-function setCachedDistances(longitude: number, latitude: number, entry: Omit<DistanceCacheEntry, "expiresAt">) {
-  distanceCache.set(cacheKeyFor(longitude, latitude), {
-    ...entry,
-    expiresAt: Date.now() + DISTANCE_CACHE_TTL_MS,
-  });
-}
-
-async function getWalkingDistance({
-  apiKey,
-  origin,
-  destination,
-}: {
-  apiKey: string;
-  origin: { longitude: number; latitude: number };
-  destination: { longitude: number; latitude: number };
-}) {
-  const url = buildAmapUrl("/v3/direction/walking", apiKey, {
-    origin: `${origin.longitude},${origin.latitude}`,
-    destination: `${destination.longitude},${destination.latitude}`,
-  });
-
-  const payload = await fetchAmapJson<AmapWalkingResponse>(url);
-  const firstPath = payload.route?.paths?.[0];
-  const distanceM = Number(firstPath?.distance);
-  const durationSeconds = Number(firstPath?.duration);
-
-  if (!Number.isFinite(distanceM) || !Number.isFinite(durationSeconds)) {
-    throw new Error("amap_empty_route");
-  }
-
-  return {
-    distanceM: Math.round(distanceM),
-    durationMin: Math.max(1, Math.ceil(durationSeconds / 60)),
-    source: "amap_walking" as const,
-  };
+  return { distances, failedCafeIds };
 }
 
 export async function POST(request: Request) {
-  const apiKey = process.env.AMAP_WEB_KEY;
-
-  if (!apiKey) {
-    return NextResponse.json(
-      { message: "当前位置步行距离暂时不可用，先显示校门距离。" },
-      { status: 503 },
-    );
+  const requestId = randomUUID();
+  if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
+    return apiError(415, "UNSUPPORTED_MEDIA_TYPE", "请求必须使用 JSON 格式。", requestId);
   }
-
+  const key = process.env.AMAP_WEB_KEY?.trim();
+  if (!key) return apiError(503, "DISTANCE_NOT_CONFIGURED", "当前位置距离暂不可用，已保留校门距离。", requestId);
   const parsed = requestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return apiError(400, "INVALID_LOCATION", "定位坐标格式不正确。", requestId);
+  const snapshot = await getPublicCoffeeSnapshot();
 
-  if (!parsed.success) {
-    return NextResponse.json(
-      { message: "定位坐标格式不正确。" },
-      { status: 400 },
-    );
-  }
-
-  const userCoordinate = parsed.data;
-  const origin = await toAmapCoordinate({
-    apiKey,
-    longitude: userCoordinate.longitude,
-    latitude: userCoordinate.latitude,
-    coordinateSystem: userCoordinate.coordinateSystem,
-  }).catch(() => ({
-    longitude: userCoordinate.longitude,
-    latitude: userCoordinate.latitude,
+  const origin = await convertCoordinate(key, parsed.data.longitude, parsed.data.latitude, parsed.data.coordinateSystem).catch(() => ({
+    longitude: parsed.data.longitude,
+    latitude: parsed.data.latitude,
   }));
-
-  const cached = getCachedDistances(origin.longitude, origin.latitude);
-  if (cached) {
-    return NextResponse.json({
-      distances: cached.distances,
-      failedCafeIds: cached.failedCafeIds,
-      cached: true,
-      message: cached.failedCafeIds.length ? "部分店铺步行距离暂时不可用，已保留校门距离。" : undefined,
-    });
+  const cacheKey = bucketKey(snapshot.version, origin.longitude, origin.latitude);
+  const cached = cache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return NextResponse.json({ ...cached, cached: true, dataVersion: snapshot.version }, { headers: { "Cache-Control": "private, max-age=60" } });
   }
+  cache.delete(cacheKey);
 
-  const distances: WalkingDistanceMap = {};
-  const failedCafeIds: string[] = [];
-
-  for (const [index, cafe] of cafes.entries()) {
-    if (index > 0) {
-      await sleep(AMAP_REQUEST_SPACING_MS);
-    }
-
-    try {
-      distances[cafe.id] = await getWalkingDistance({
-        apiKey,
-        origin,
-        destination: getCafeDestination(cafe),
-      });
-    } catch {
-      failedCafeIds.push(cafe.id);
-    }
+  let pending = inFlight.get(cacheKey);
+  if (!pending) {
+    pending = calculate(key, origin, snapshot.cafes).finally(() => inFlight.delete(cacheKey));
+    inFlight.set(cacheKey, pending);
   }
-
-  if (Object.keys(distances).length === 0) {
-    return NextResponse.json(
-      { message: "高德步行距离暂时不可用，先显示校门距离。" },
-      { status: 502 },
-    );
+  const result = await pending;
+  if (!Object.keys(result.distances).length) {
+    recordMetric("location_result", { success: false, cafeCount: snapshot.cafes.length });
+    return apiError(502, "DISTANCE_UNAVAILABLE", "高德步行距离暂不可用，已保留校门距离。", requestId);
   }
-
-  setCachedDistances(origin.longitude, origin.latitude, { distances, failedCafeIds });
-
-  return NextResponse.json({
-    distances,
-    failedCafeIds,
-    cached: false,
-    message: failedCafeIds.length ? "部分店铺步行距离暂时不可用，已保留校门距离。" : undefined,
-  });
+  cache.set(cacheKey, { ...result, expiresAt: Date.now() + CACHE_TTL_MS });
+  recordMetric("location_result", { success: true, resolvedCafeCount: Object.keys(result.distances).length, failedCafeCount: result.failedCafeIds.length, cached: false });
+  return NextResponse.json({ ...result, cached: false, dataVersion: snapshot.version }, { headers: { "Cache-Control": "private, max-age=60" } });
 }
